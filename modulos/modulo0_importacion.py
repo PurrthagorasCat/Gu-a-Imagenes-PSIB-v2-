@@ -7,6 +7,7 @@ Apertura de los videos (.MOV), lectura de metadatos y frames, y visualización d
 import cv2                       # OpenCV: lectura de video, procesamiento de imágenes y ventanas
 import numpy as np               # Cálculo numérico (arrays, linspace, ceil)
 import matplotlib.pyplot as plt  # Gráficos para mostrar frames sueltos
+from matplotlib.patches import Rectangle, ConnectionPatch  # Recuadro de la ROI y flecha entre gráficos
 
 
 # ------------------------------------------------------------
@@ -85,6 +86,82 @@ def leer_frame(video, indice):
         # Índice fuera de rango o frame imposible de decodificar
         raise IndexError(f"No se pudo leer el frame {indice}")
     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+
+# ------------------------------------------------------------
+# Región de interés (ROI)
+# ------------------------------------------------------------
+
+def seleccionar_roi(frame, alto_max=900, ancho_max=1400):
+    """
+    Abre una ventana para seleccionar la ROI a mano sobre el frame (en RGB).
+
+    Se arrastra un rectángulo con el mouse y se confirma con Enter o Espacio;
+    la tecla c cancela. Si el frame no entra en pantalla se muestra achicado,
+    pero las coordenadas devueltas corresponden a la imagen original.
+
+    Devuelve (x, y, ancho, alto) en píxeles.
+    """
+    alto, ancho = frame.shape[:2]
+    # Factor de escala para que la imagen entre en pantalla
+    escala = min(1.0, alto_max / alto, ancho_max / ancho)
+    # INTER_AREA es la interpolación recomendada para reducir imágenes (evita el aliasing)
+    vista = cv2.resize(frame, None, fx=escala, fy=escala, interpolation=cv2.INTER_AREA)
+    vista = cv2.cvtColor(vista, cv2.COLOR_RGB2BGR)  # La ventana de OpenCV espera BGR
+
+    # selectROI bloquea el programa hasta que se confirma o cancela, y devuelve el rectángulo elegido
+    titulo = "Seleccionar ROI - Enter confirma, c cancela"
+    x, y, w, h = cv2.selectROI(titulo, vista, showCrosshair=True, fromCenter=False)
+    cv2.destroyAllWindows()
+    cv2.waitKey(1)  # Esta línae es necesario para que la ventana se cierre al usarla desde Jupyter
+
+    if w == 0 or h == 0:
+        # Se canceló o no se arrastró ningún rectángulo
+        raise ValueError("No se seleccionó ninguna región")
+    # Las coordenadas están en la vista achicada, así que se dividen por la escala
+    # para llevarlas al tamaño original del frame
+    return tuple(int(round(v / escala)) for v in (x, y, w, h))
+
+
+def recortar_roi(frame, roi):
+    """Devuelve la porción del frame delimitada por roi = (x, y, ancho, alto)."""
+    x, y, w, h = roi
+    return frame[y:y + h, x:x + w].copy()
+
+
+def mostrar_roi(frame, roi, indice_frame=None):
+    """
+    Muestra el frame completo con la ROI recuadrada y, al lado, la ROI ampliada,
+    unidas por una flecha.
+    """
+    x, y, w, h = roi
+    recorte = recortar_roi(frame, roi)
+
+    fig, (eje_frame, eje_roi) = plt.subplots(1, 2, figsize=(13, 6))
+
+    # Frame completo con la ROI marcada con un rectángulo rojo sin relleno
+    eje_frame.imshow(frame)
+    eje_frame.add_patch(Rectangle((x, y), w, h, fill=False, edgecolor="red", linewidth=2))
+    titulo = "Frame completo" if indice_frame is None else f"Frame {indice_frame}"
+    eje_frame.set_title(f"{titulo}  ({frame.shape[1]} x {frame.shape[0]} px)")
+    eje_frame.axis("off")
+
+    # ROI ampliada
+    eje_roi.imshow(recorte)
+    eje_roi.set_title(f"ROI  ({w} x {h} px, origen en x = {x}, y = {y})")
+    eje_roi.axis("off")
+
+    # Flecha desde el borde derecho de la ROI (en píxeles del frame) hasta el borde
+    # izquierdo del segundo gráfico (en fracción de ejes: 0 = izquierda, 0.5 = mitad de alto)
+    flecha = ConnectionPatch(
+        xyA=(x + w, y + h / 2), coordsA="data", axesA=eje_frame,
+        xyB=(0, 0.5), coordsB="axes fraction", axesB=eje_roi,
+        arrowstyle="-|>", mutation_scale=20, color="red", linewidth=2,
+    )
+    fig.add_artist(flecha)  # Se agrega a la figura (y no a un eje) porque une dos gráficos
+
+    fig.tight_layout()
+    plt.show()
 
 
 # ------------------------------------------------------------
