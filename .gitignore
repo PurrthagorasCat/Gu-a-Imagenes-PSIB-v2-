@@ -1,0 +1,16 @@
+# Entornos virtuales
+.venv/
+.venv.nosync/
+
+# Archivos generados por Python y macOS
+__pycache__/
+*.pyc
+.DS_Store
+
+# Videos de los registros: pesan más de 100 MB y GitHub no los acepta
+videos/*.MOV
+videos/*.mov
+
+# Salidas generadas al correr el pipeline
+resultados/*.csv
+modulos/Modulo2_segmentacion/resultados_video/registro_*
