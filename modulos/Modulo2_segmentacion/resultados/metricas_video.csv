@@ -1,0 +1,97 @@
+imagen,etapa,metodo,dice,iou
+video_frame_0384.png,2.1,Otsu global (T=124),nan,nan
+video_frame_0384.png,2.1,Otsu ROI (T=94),nan,nan
+video_frame_0384.png,2.1,Otsu multinivel ROI (T=76),nan,nan
+video_frame_0384.png,2.1,K-means K=2,nan,nan
+video_frame_0384.png,2.1,K-means K=3,nan,nan
+video_frame_0384.png,2.1,K-means K=4,nan,nan
+video_frame_0384.png,2.1,K-means K=5,nan,nan
+video_frame_0384.png,2.1,Snake,nan,nan
+video_frame_0384.png,2.1,Watershed,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=1,original,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=1,erosion,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=1,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=1,apertura,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=1,cierre,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=1,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=1,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=1,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=2,erosion,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=2,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=2,apertura,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=2,cierre,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=2,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=2,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=2,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=3,erosion,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=3,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=3,apertura,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=3,cierre,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=3,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=3,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=3,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=4,erosion,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=4,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=4,apertura,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=4,cierre,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=4,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=4,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Otsu multinivel ROI (T=76)] r=4,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=1,original,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=1,erosion,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=1,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=1,apertura,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=1,cierre,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=1,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=1,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=1,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=2,erosion,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=2,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=2,apertura,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=2,cierre,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=2,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=2,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=2,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=3,erosion,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=3,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=3,apertura,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=3,cierre,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=3,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=3,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=3,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=4,erosion,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=4,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=4,apertura,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=4,cierre,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=4,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=4,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Watershed] r=4,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Snake] r=1,original,nan,nan
+video_frame_0384.png,2.2 [Snake] r=1,erosion,nan,nan
+video_frame_0384.png,2.2 [Snake] r=1,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Snake] r=1,apertura,nan,nan
+video_frame_0384.png,2.2 [Snake] r=1,cierre,nan,nan
+video_frame_0384.png,2.2 [Snake] r=1,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Snake] r=1,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Snake] r=1,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Snake] r=2,erosion,nan,nan
+video_frame_0384.png,2.2 [Snake] r=2,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Snake] r=2,apertura,nan,nan
+video_frame_0384.png,2.2 [Snake] r=2,cierre,nan,nan
+video_frame_0384.png,2.2 [Snake] r=2,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Snake] r=2,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Snake] r=2,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Snake] r=3,erosion,nan,nan
+video_frame_0384.png,2.2 [Snake] r=3,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Snake] r=3,apertura,nan,nan
+video_frame_0384.png,2.2 [Snake] r=3,cierre,nan,nan
+video_frame_0384.png,2.2 [Snake] r=3,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Snake] r=3,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Snake] r=3,apertura+CC+cierre+relleno,nan,nan
+video_frame_0384.png,2.2 [Snake] r=4,erosion,nan,nan
+video_frame_0384.png,2.2 [Snake] r=4,dilatacion,nan,nan
+video_frame_0384.png,2.2 [Snake] r=4,apertura,nan,nan
+video_frame_0384.png,2.2 [Snake] r=4,cierre,nan,nan
+video_frame_0384.png,2.2 [Snake] r=4,cierre+apertura,nan,nan
+video_frame_0384.png,2.2 [Snake] r=4,apertura+cierre,nan,nan
+video_frame_0384.png,2.2 [Snake] r=4,apertura+CC+cierre+relleno,nan,nan
