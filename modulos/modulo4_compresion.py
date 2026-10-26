@@ -7,9 +7,7 @@ binarias se pasan a 0/255.
 """
 
 import heapq                     # Cola de prioridad para armar el árbol de Huffman
-import os                        # Ruta de la carpeta del módulo 2
-import sys                       # Agregar la carpeta del módulo 2 al path
-import cv2                       # OpenCV: codificación JPEG, gradientes y transformaciones
+import cv2                      # OpenCV: codificación JPEG, gradientes y transformaciones
 import numpy as np               # Cálculo numérico
 import pandas as pd              # Tablas de resultados
 import matplotlib                # Para recuperar el backend de gráficos que cambia el módulo 2
@@ -387,36 +385,36 @@ def analizar_artefactos(imagen, reconstruidas):
 # 4.6 Efecto de JPEG sobre el diámetro pupilar (módulo 3)
 # ------------------------------------------------------------
 
-def segmentador_modulo2(imagen_referencia):
+def segmentador_modulo2(imagen_referencia, roi):
     """
-    Prepara una función que segmenta la pupila con el método del módulo 2. El ojo se
-    ubica una sola vez en la imagen de referencia y se usa esa misma ubicación siempre, así
-    al comparar versiones comprimidas lo único que cambia es la compresión.
+    Prepara una función que segmenta la pupila con el método del módulo 2 (snake +
+    morfología) dentro de una ROI fija. La pupila se ubica una sola vez en la imagen de
+    referencia y se usa esa misma posición siempre, así al comparar versiones comprimidas
+    lo único que cambia es la compresión.
 
-    Entrada: imagen_referencia (RGB)
+    Entrada: imagen_referencia (RGB), roi = (x, y, ancho, alto) en px de la imagen, que
+             encierre el iris con un poco de margen (como la ROI que se marca en el módulo 2)
     Salida: función imagen RGB -> máscara binaria del tamaño de la imagen
     """
-    # El módulo 2 no es un paquete: se agrega su carpeta al path. Se importa acá adentro
-    # porque al importarse desactiva las ventanas de matplotlib; se restaura el backend
+    # Se importa acá adentro porque el módulo 2, al importarse, desactiva las ventanas de
+    # matplotlib; después se restaura el backend
     backend = matplotlib.get_backend()
-    carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Modulo2_segmentacion")
-    if carpeta not in sys.path:
-        sys.path.insert(0, carpeta)
-    import procesar_video as m2
-    from roi_ojo import recortar_ojo
+    from . import modulo2_segmentacion as m2
     plt.switch_backend(backend)
 
-    _, info = recortar_ojo(cv2.cvtColor(imagen_referencia, cv2.COLOR_RGB2BGR), verbose=False)
-    ojo = info["cand"]
+    region = m2.ROI(*[int(round(v)) for v in roi], origen="módulo 4")
+    recorte, _ = m2.recortar(cv2.cvtColor(imagen_referencia, cv2.COLOR_RGB2BGR), region)
+    x, y, r0 = m2.estimar_pupila(cv2.cvtColor(recorte, cv2.COLOR_BGR2GRAY))
 
     def segmentar(imagen):
-        recorte, info = recortar_ojo(cv2.cvtColor(imagen, cv2.COLOR_RGB2BGR), cand=ojo, verbose=False)
-        mascara, _ = m2.segmentar_frame(recorte)
+        recorte, info = m2.recortar(cv2.cvtColor(imagen, cv2.COLOR_RGB2BGR), region)
+        m2.ESC = info["esc"]   # El módulo 2 escala algunos parámetros con esta variable global
+        mascara, _ = m2.segmentar_frame(recorte, (x, y), info["esc"], r_ref=info["r_ref"], r0=r0)
         alto, ancho = imagen.shape[:2]
         if mascara is None:
             return np.zeros((alto, ancho), bool)
-        # El módulo 2 segmenta sobre un recorte reescalado: se lleva la máscara de vuelta
-        # a las coordenadas de la imagen con la transformación inversa del recorte
+        # La máscara está en coordenadas del recorte: se lleva a las de la imagen con la
+        # transformación inversa del recorte
         return cv2.warpAffine(mascara.astype(np.uint8), info["M"], (ancho, alto),
                               flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP) > 0
     return segmentar

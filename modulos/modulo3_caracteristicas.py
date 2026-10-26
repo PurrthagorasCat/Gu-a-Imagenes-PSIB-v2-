@@ -3,7 +3,7 @@ Módulo 3 — Extracción de características, textura y dinámica temporal.
 
 3.1 a 3.3 trabajan sobre un frame y parten de la máscara binaria de la pupila.
 3.4 a 3.6 trabajan sobre el video completo y parten de la salida del módulo 2:
-    filas, r_iris_px = procesar_video(ruta_video)          # módulo 2
+    filas, r_iris_px = ejecutar_modulo2(ruta_video)        # módulo 2
     curva = curva_desde_modulo2(filas, ruta_video, r_iris_px)
     curva = limpiar_curva(curva)
     t_estimulo, tipo = detectar_estimulo(curva)
@@ -308,29 +308,35 @@ def curva_desde_modulo2(filas, ruta_video=None, r_iris_px=None):
     agrega el brillo de cada frame. El diámetro es el ancho horizontal de la pupila que mide
     el módulo 2 (los párpados casi no lo afectan). Los frames que descartó quedan en NaN.
 
-    Entrada: filas (lo que devuelve procesar_video del módulo 2, o su CSV _serie.csv),
+    Entrada: filas (lo que devuelve ejecutar_modulo2 del módulo 2, o su CSV _serie.csv),
              ruta_video (opcional, para el brillo), r_iris_px (radio del iris del módulo 2;
-             si no se pasa se calcula de la tabla)
+             si no se pasa se intenta calcular de la tabla)
     Salida: DataFrame con las columnas de COLUMNAS_CURVA
     """
     serie = pd.DataFrame(filas).reset_index(drop=True)
     if r_iris_px is None:
         r_iris_px = radio_iris_modulo2(serie)
 
+    # Diámetro equivalente al área. La versión actual del módulo 2 lo da en px (d_area_px);
+    # la anterior lo daba dividido por el diámetro del iris (d_area_iris)
+    if "d_area_px" in serie:
+        d_area = serie["d_area_px"].astype(float)
+    else:
+        d_area = serie["d_area_iris"].astype(float) * 2 * r_iris_px
+
     curva = pd.DataFrame({
         "frame": serie["frame"].astype(int),
         "t_s": serie["t"].astype(float),
         "brillo": np.nan,
         "diametro": serie["d_pupila_px"].astype(float),
-        # d_area_iris es el diámetro equivalente al área dividido por el diámetro del iris
-        "area": np.pi * (serie["d_area_iris"].astype(float) * r_iris_px) ** 2,
+        "area": np.pi * (d_area / 2) ** 2,
         "centroide_x": serie["cx"].astype(float),
         "centroide_y": serie["cy"].astype(float),
         "circularidad": serie["circularidad"].astype(float),
         "motivo_invalido": serie["motivo"].fillna("").astype(str),
     }, columns=COLUMNAS_CURVA)
     # El área solo vale en los frames en los que el diámetro es válido: el filtro de
-    # atípicos del módulo 2 anula d_pupila_px pero no d_area_iris
+    # atípicos del módulo 2 anula d_pupila_px pero no el diámetro del área
     curva.loc[curva["diametro"].isna(), "area"] = np.nan
 
     if ruta_video is not None:
@@ -348,12 +354,16 @@ def curva_desde_modulo2(filas, ruta_video=None, r_iris_px=None):
 
 def radio_iris_modulo2(serie):
     """
-    Recupera el radio del iris (px) que usó el módulo 2 como escala.
+    Recupera el radio del iris (px) que usó el módulo 2 como escala. Solo funciona con la
+    tabla de la versión anterior del módulo 2 (columna pupila_iris); con la actual el radio
+    hay que pasarlo, porque lo devuelve ejecutar_modulo2.
 
     Entrada: serie (DataFrame del módulo 2)
-    Salida: radio en px (NaN si no hay frames válidos)
+    Salida: radio en px (NaN si no se puede calcular)
     """
-    validos = serie["d_pupila_px"].notna() & serie["pupila_iris"].notna() & (serie["pupila_iris"] > 0)
+    if "pupila_iris" not in serie:
+        return np.nan
+    validos =serie["d_pupila_px"].notna() & serie["pupila_iris"].notna() & (serie["pupila_iris"] > 0)
     if not validos.any():
         return np.nan
     return float(np.median(serie.loc[validos, "d_pupila_px"] / serie.loc[validos, "pupila_iris"])) / 2
