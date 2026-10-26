@@ -85,6 +85,7 @@ OUT_VIDEO = CARPETA_RESULTADOS / "resultados_video"
 OUT_IMAGEN = CARPETA_RESULTADOS / "resultados_imagen"
 ARCHIVO_ROI = CARPETA_ANOTACIONES / "roi.json"
 ARCHIVO_REFERENCIAS = CARPETA_ANOTACIONES / "referencias.json"
+ARCHIVO_FRAMES = CARPETA_ANOTACIONES / "frames_referencia.json"   # frame sobre el que se marcó cada ROI
 
 NOMBRE_VIDEO = None       # p.ej. "registro_A1.MOV"; None = el más reciente de videos/
 BORRAR_RESULTADOS = True  # borrar resultados/resultados_modulo2 antes de empezar (--conservar-resultados)
@@ -204,6 +205,23 @@ def _a_roi(v, origen):
         return ROI(int(round(x - lado / 2)), int(round(y - lado / 2)),
                    int(round(lado)), int(round(lado)), origen)
     return ROI(*[int(round(t)) for t in v], origen=origen)
+
+
+def guardar_frame_referencia(nombre, indice):
+    """Frame del video sobre el que se marcó el ROI. Se usa también para la
+    escala y para las figuras del mejoramiento (por si el primero no sirve,
+    p.ej. porque el video empieza con un parpadeo)."""
+    CARPETA_ANOTACIONES.mkdir(parents=True, exist_ok=True)
+    datos = json.loads(ARCHIVO_FRAMES.read_text(encoding="utf-8")) if ARCHIVO_FRAMES.exists() else {}
+    datos[nombre] = int(indice)
+    ARCHIVO_FRAMES.write_text(json.dumps(datos, indent=2), encoding="utf-8")
+
+
+def frame_referencia_guardado(nombre):
+    """Frame de referencia guardado para el video `nombre`, o None."""
+    if not ARCHIVO_FRAMES.exists():
+        return None
+    return json.loads(ARCHIVO_FRAMES.read_text(encoding="utf-8")).get(nombre)
 
 
 def roi_guardado(nombre):
@@ -845,30 +863,34 @@ def leer_frames(cap, max_frames=None, buffer=8):
 # ----------------------------------------------------------------------------
 # Inicialización: escala fija
 # ----------------------------------------------------------------------------
-def inicializar(path, rect=None, nuevo_roi=False):
+def inicializar(path, rect=None, nuevo_roi=False, indice=0):
     """ROI manual del video: --roi, el guardado en roi.json o, si no hay, se
-    marca con el mouse sobre el primer frame (y se guarda en roi.json)."""
+    marca con el mouse sobre el frame `indice` (y se guarda en roi.json)."""
     with abrir_video(path) as cap:
+        if indice:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, indice)
         ok, f = cap.read()
     if not ok:
-        raise RuntimeError("No se pudo leer el primer frame del video")
+        raise RuntimeError(f"No se pudo leer el frame {indice} del video")
     roi = obtener_roi(f, Path(path).name, rect=rect, nuevo=nuevo_roi)
     print(f"ROI: x={roi.x0} y={roi.y0} {roi.w}x{roi.h} px ({roi.origen}); "
-          f"escala de parámetros = {roi.esc:.2f}")
+          f"escala de parámetros = {roi.esc:.2f}" + (f"; frame de referencia {indice}" if indice else ""))
     return roi
 
 
-def calibrar_escala(path, roi, n=10, t=2.0):
+def calibrar_escala(path, roi, n=10, t=2.0, inicio=0):
     """Tamaño de referencia para TODOS los parámetros (radio de iris, en px del
     video original), calculado a partir de la PUPILA y no del tamaño del ROI:
     se mide la pupila (estimación simple, ver estimar_pupila) en n frames de
-    los primeros t segundos y se toma la mediana (descarta parpadeos)."""
+    los t segundos que siguen al frame `inicio` y se toma la mediana
+    (descarta parpadeos)."""
     radios = []
     with abrir_video(path) as cap:
         fps = fps_de(cap)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         f_rap = min(1.0, 600 / max(roi.w, roi.h))          # sólo para que sea rápido
-        for i in np.unique(np.linspace(0, max(1, min(total, a_frames(t, fps))) - 1, n).astype(int)):
+        fin = min(total, inicio + a_frames(t, fps))
+        for i in np.unique(np.linspace(inicio, max(inicio + 1, fin) - 1, n).astype(int)):
             cap.set(cv2.CAP_PROP_POS_FRAMES, int(i))
             ok, f = cap.read()
             if not ok:
@@ -880,11 +902,12 @@ def calibrar_escala(path, roi, n=10, t=2.0):
             if r > 2 and ((x - w / 2) / (w / 2)) ** 2 + ((y - h / 2) / (h / 2)) ** 2 < 0.8:
                 radios.append(r / f_rap)
     if not radios:
-        print("  [aviso] no se pudo medir la pupila al comienzo: la escala se deduce del ROI")
+        print("  [aviso] no se pudo medir la pupila: la escala se deduce del ROI")
         return roi.r_ref
     r_p = float(np.median(radios))
     r_iris = r_p / PUPILA_SOBRE_IRIS
-    print(f"Escala: radio de pupila al comienzo ≈ {r_p:.1f} px -> radio de iris de referencia "
+    print(f"Escala: radio de pupila {'al comienzo' if not inicio else f'desde el frame {inicio}'} "
+          f"≈ {r_p:.1f} px -> radio de iris de referencia "
           f"≈ {r_iris:.0f} px (mediana de {len(radios)} frames)")
     return r_iris
 
@@ -1028,23 +1051,32 @@ def ref_en_recorte(pts, info, shape):
 # ----------------------------------------------------------------------------
 # Programa principal
 # ----------------------------------------------------------------------------
-def preparar(path, rect=None, nuevo_roi=False, factor=None):
+def preparar(path, rect=None, nuevo_roi=False, factor=None, frame_referencia=None):
     """ROI, escala (radio de iris de referencia) y resolución de procesamiento
     del video: lo que necesitan el mejoramiento (módulo 1) y la segmentación.
-    Devuelve un dict con roi, r_iris y factor."""
-    roi = inicializar(path, rect, nuevo_roi)
-    r_iris = calibrar_escala(path, roi)
+    frame_referencia: frame sobre el que se marca el ROI y desde el que se mide
+    la escala; si no se da, el guardado para este video o, si no hay, el primero.
+    Devuelve un dict con roi, r_iris, factor y frame_referencia."""
+    nombre = Path(path).name
+    if frame_referencia is None:
+        frame_referencia = frame_referencia_guardado(nombre) or 0
+    roi = inicializar(path, rect, nuevo_roi, frame_referencia)
+    guardar_frame_referencia(nombre, frame_referencia)
+    r_iris = calibrar_escala(path, roi, inicio=frame_referencia)
     factor = factor_auto(roi, r_iris) if factor is None else min(1.0, factor)
     print(f"Resolución de procesamiento: {100 * factor:.0f} % del video original "
           f"(radio de iris ≈ {r_iris * factor:.0f} px)")
-    return dict(roi=roi, r_iris=r_iris, factor=factor)
+    return dict(roi=roi, r_iris=r_iris, factor=factor, frame_referencia=frame_referencia)
 
 
-def frame_mejorado(path, preparacion, indice=0):
+def frame_mejorado(path, preparacion, indice=None):
     """Recorte del ROI de un frame y su mejora (módulo 1), igual que al comienzo
     del seguimiento: la pupila se ubica en todo el ROI y el rango de interés se
     calcula a su alrededor. Sirve para mostrar el paso de mejoramiento.
+    indice: el frame a mostrar; si no se da, el de referencia de la preparación.
     Devuelve (recorte BGR, mejora, info del recorte)."""
+    if indice is None:
+        indice = preparacion.get("frame_referencia", 0)
     with abrir_video(path) as cap:
         if indice:
             cap.set(cv2.CAP_PROP_POS_FRAMES, indice)
