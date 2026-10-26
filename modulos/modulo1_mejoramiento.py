@@ -6,7 +6,12 @@ import cv2
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_rgb
+from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import find_peaks
+from skimage.filters import threshold_otsu
  
 # ------------------------------------------------------------
 # 1.1 Dimensiones, resolución espacial, cuantización y color
@@ -186,6 +191,152 @@ def recorte_central(imagen, fraccion=0.4):
     return imagen[y0:y0 + h, x0:x0 + w]
  
  
+ 
+
+# ------------------------------------------------------------
+# 1.3 Detección de bordes
+# ------------------------------------------------------------
+ 
+# Kernels (dirección x, dirección y)
+KERNELS = {
+    "Roberts": (np.array([[1, 0], [0, -1]]), np.array([[0, 1], [-1, 0]])),
+    "Prewitt": (np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]),
+                np.array([[-1, -1, -1], [0, 0, 0], [1, 1, 1]])),
+}
+ 
+ 
+def magnitud_gradiente(imagen, operador):
+    """|∇f| = √(Gx² + Gy²) con el operador de Roberts, Prewitt o Sobel."""
+    f = imagen.astype(np.float32)
+    if operador == "Sobel":
+        gx = cv2.Sobel(f, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(f, cv2.CV_32F, 0, 1, ksize=3)
+    else:
+        kx, ky = KERNELS[operador]
+        gx = cv2.filter2D(f, cv2.CV_32F, kx.astype(np.float32))
+        gy = cv2.filter2D(f, cv2.CV_32F, ky.astype(np.float32))
+    return np.hypot(gx, gy)
+ 
+ 
+def laplaciano(imagen):
+    """|∇²f| con el kernel de 3x3 de 4 vecinos."""
+    return np.abs(cv2.Laplacian(imagen.astype(np.float32), cv2.CV_32F, ksize=1))
+ 
+ 
+def canny(imagen, umbral_bajo, umbral_alto):
+    """Canny completo: suavizado gaussiano (5x5, σ = 1,4) y luego cv2.Canny, que no suaviza por sí mismo."""
+    suavizada = cv2.GaussianBlur(imagen, (5, 5), 1.4)
+    return cv2.Canny(suavizada, umbral_bajo, umbral_alto, L2gradient=True)
+ 
+ 
+def umbrales_canny(imagen, percentil=90, proporcion=0.4):
+    """Umbral alto = percentil de |∇f| (Sobel) de la imagen suavizada; umbral bajo = proporción del alto."""
+    suavizada = cv2.GaussianBlur(imagen, (5, 5), 1.4)
+    alto = float(np.percentile(magnitud_gradiente(suavizada, "Sobel"), percentil))
+    return proporcion * alto, alto
+ 
+ 
+def detectar_bordes(imagen, umbral_bajo, umbral_alto):
+    """Magnitud de Roberts, Sobel, Prewitt y Laplaciano, y bordes binarios de Canny."""
+    mapas = {op: magnitud_gradiente(imagen, op) for op in ("Roberts", "Sobel", "Prewitt")}
+    mapas["Laplaciano"] = laplaciano(imagen)
+    mapas["Canny"] = canny(imagen, umbral_bajo, umbral_alto)
+    return mapas
+ 
+ 
+def para_mostrar(mapa, percentil=99):
+    """Escala un mapa a 0–255 saturando en un percentil, para que pocos bordes fuertes no opaquen al resto."""
+    tope = max(np.percentile(mapa, percentil), 1e-6)
+    return np.clip(mapa / tope * 255, 0, 255).astype(np.uint8)
+ 
+ 
+# ------------------------------------------------------------
+# 1.3 Dominio frecuencial
+# ------------------------------------------------------------
+ 
+def espectro(imagen):
+    """TFD-2D centrada (frecuencia cero en el centro)."""
+    return np.fft.fftshift(np.fft.fft2(imagen.astype(np.float64)))
+ 
+ 
+def reconstruir(espectro_centrado):
+    """TFD-2D inversa de un espectro centrado (parte real)."""
+    return np.real(np.fft.ifft2(np.fft.ifftshift(espectro_centrado)))
+ 
+ 
+def normalizar(imagen, percentiles=(0, 100)):
+    """Escala lineal a 0–255 entre dos percentiles (para mostrar reconstrucciones)."""
+    bajo, alto = np.percentile(imagen, percentiles)
+    return np.clip((imagen - bajo) / max(alto - bajo, 1e-12) * 255, 0, 255).astype(np.uint8)
+ 
+ 
+def frecuencias_radiales(forma):
+    """Frecuencia radial ρ (ciclos/píxel) de cada punto de un espectro centrado."""
+    alto, ancho = forma
+    u = np.fft.fftshift(np.fft.fftfreq(ancho))
+    v = np.fft.fftshift(np.fft.fftfreq(alto))
+    U, V = np.meshgrid(u, v)
+    return np.hypot(U, V)
+ 
+ 
+def psd(imagen):
+    """PSD = |F|² / (M·N), centrada. Se resta la media para que la componente continua no domine."""
+    f = imagen.astype(np.float64)
+    return np.abs(espectro(f - f.mean())) ** 2 / f.size
+ 
+ 
+def perfil_radial(mapa, bins=100):
+    """Promedio de un mapa centrado en anillos de igual frecuencia radial, de 0 a 0,5 ciclos/píxel."""
+    rho = frecuencias_radiales(mapa.shape).ravel()
+    bordes = np.linspace(0, 0.5, bins + 1)
+    idx = np.digitize(rho, bordes) - 1
+    ok = (idx >= 0) & (idx < bins)
+    suma = np.bincount(idx[ok], weights=mapa.ravel()[ok], minlength=bins)
+    cuenta = np.bincount(idx[ok], minlength=bins)
+    return (bordes[:-1] + bordes[1:]) / 2, suma / np.maximum(cuenta, 1)
+ 
+ 
+def filtro_pasabajos(forma, corte, tipo="gaussiano"):
+    """H(u, v) centrado. Ideal: 1 si ρ ≤ corte. Gaussiano: exp(−ρ² / 2·corte²). Corte en ciclos/píxel."""
+    rho = frecuencias_radiales(forma)
+    if tipo == "ideal":
+        return (rho <= corte).astype(np.float64)
+    return np.exp(-rho ** 2 / (2 * corte ** 2))
+ 
+ 
+def filtrar_frecuencia(imagen, corte, tipo="gaussiano", pasaaltos=False, relleno=32):
+    """
+    Filtrado en frecuencia: relleno por reflexión → TFD → H(u, v) → TFD inversa → recorte.
+    El relleno evita artefactos en los bordes, porque la TFD supone la imagen periódica.
+    Devuelve valores reales (con signo en el pasaaltos).
+    """
+    f = cv2.copyMakeBorder(imagen.astype(np.float64), relleno, relleno, relleno, relleno,
+                           cv2.BORDER_REFLECT_101)
+    H = filtro_pasabajos(f.shape, corte, tipo)
+    if pasaaltos:
+        H = 1 - H
+    g = reconstruir(espectro(f) * H)
+    return g[relleno:-relleno, relleno:-relleno]
+ 
+ 
+def a_uint8(imagen):
+    """Redondea y satura a 0–255."""
+    return np.clip(np.round(imagen), 0, 255).astype(np.uint8)
+ 
+ 
+def respuesta_kernel(kernel, n=512):
+    """|H(f)| de un kernel espacial sobre el eje horizontal, de 0 a 0,5 ciclos/píxel."""
+    H = np.abs(np.fft.fft2(kernel, s=(n, n)))
+    return np.arange(n // 2 + 1) / n, H[0, :n // 2 + 1]
+ 
+ 
+def sigma_gaussiano_opencv(k):
+    """σ que usa OpenCV para un kernel gaussiano de K x K cuando se le pasa σ = 0."""
+    return 0.3 * ((k - 1) * 0.5 - 1) + 0.8
+ 
+
+ 
+ 
 # ------------------------------------------------------------
 # Visualización
 # ------------------------------------------------------------
@@ -303,5 +454,30 @@ def graficar_transformaciones(curvas, titulo=None):
     plt.show()
  
  
-# Pendiente: Detección de bordes
-# Pendiente: TFD-2D, densidad espectral de potencia y filtrado en frecuencia
+ 
+def superponer(imagen, capas):
+    """Imagen en grises con máscaras coloreadas encima; `capas` = [(máscara, color), ...]."""
+    salida = np.dstack([imagen] * 3) / 255
+    for mascara, color in capas:
+        salida[mascara] = np.array(to_rgb(color))
+    return salida
+ 
+ 
+def graficar_curvas(curvas, titulo, xlabel, ylabel, log_y=False, referencia=None):
+    """Curvas sobre un mismo eje; `curvas` = {nombre: (x, y)}. La de `referencia` va en gris."""
+    fig, eje = plt.subplots(figsize=(8, 4.5), layout="constrained")
+    colores = iter(COLORES)
+    for nombre, (x, y) in curvas.items():
+        if nombre == referencia:
+            eje.plot(x, y, color=GRIS_TEXTO, linewidth=2, linestyle="--", label=nombre)
+        else:
+            eje.plot(x, y, color=next(colores), linewidth=2, label=nombre)
+    if log_y:
+        eje.set_yscale("log")
+    eje.set_xlabel(xlabel, color=GRIS_TEXTO)
+    eje.set_ylabel(ylabel, color=GRIS_TEXTO)
+    eje.set_title(titulo, fontweight="bold")
+    eje.legend(frameon=False, fontsize=9)
+    _ejes_recesivos(eje)
+    eje.grid(axis="x", color=GRIS_GRILLA, linewidth=0.8)
+    plt.show()

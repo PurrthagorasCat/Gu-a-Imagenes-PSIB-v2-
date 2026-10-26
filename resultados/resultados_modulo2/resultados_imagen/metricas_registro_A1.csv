@@ -1,0 +1,96 @@
+imagen,etapa,metodo,dice,iou
+registro_A1_frame_0098.png,2.1,Otsu (T=121),nan,nan
+registro_A1_frame_0098.png,2.1,Otsu multinivel (T=99),nan,nan
+registro_A1_frame_0098.png,2.1,K-means K=2,nan,nan
+registro_A1_frame_0098.png,2.1,K-means K=3,nan,nan
+registro_A1_frame_0098.png,2.1,K-means K=4,nan,nan
+registro_A1_frame_0098.png,2.1,K-means K=5,nan,nan
+registro_A1_frame_0098.png,2.1,Snake,nan,nan
+registro_A1_frame_0098.png,2.1,Watershed,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=2px,original,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=2px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=2px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=2px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=2px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=2px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=2px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=2px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=4px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=4px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=4px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=4px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=4px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=4px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=4px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=6px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=6px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=6px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=6px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=6px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=6px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=6px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=8px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=8px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=8px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=8px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=8px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=8px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Otsu multinivel (T=99)] r=8px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=2px,original,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=2px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=2px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=2px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=2px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=2px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=2px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=2px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=4px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=4px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=4px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=4px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=4px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=4px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=4px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=6px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=6px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=6px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=6px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=6px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=6px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=6px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=8px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=8px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=8px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=8px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=8px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=8px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Watershed] r=8px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=2px,original,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=2px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=2px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=2px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=2px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=2px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=2px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=2px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=4px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=4px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=4px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=4px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=4px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=4px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=4px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=6px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=6px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=6px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=6px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=6px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=6px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=6px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=8px,erosion,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=8px,dilatacion,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=8px,apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=8px,cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=8px,cierre+apertura,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=8px,apertura+cierre,nan,nan
+registro_A1_frame_0098.png,2.2 [Snake] r=8px,apertura+CC+cierre+relleno,nan,nan

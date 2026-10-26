@@ -14,12 +14,10 @@ import matplotlib.pyplot as plt
 from modulos import modulo0_importacion as m0
 from modulos import modulo3_caracteristicas as m3
 
-# El módulo 2 no es un paquete: se agrega su carpeta al path para importarlo.
-# Al importarse desactiva las ventanas de matplotlib (backend "Agg"), así que se
-# guarda el backend actual para restaurarlo después
+# El módulo 2, al importarse, desactiva las ventanas de matplotlib (backend "Agg"),
+# así que se guarda el backend actual para restaurarlo después
 _backend = matplotlib.get_backend()
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "modulos", "Modulo2_segmentacion"))
-import procesar_video as m2  # noqa: E402
+from modulos import modulo2_segmentacion as m2  # noqa: E402
 plt.switch_backend(_backend)
 
 RUTA_VIDEO = "videos/registro_A1.MOV"
@@ -41,8 +39,9 @@ def ejecutar_pipeline():
         m0.mostrar_frames_muestra(video, metadatos)
     video.release()
 
-    # 2-3. ROI, segmentación y limpieza morfológica frame a frame -> módulo 2
-    filas, r_iris = m2.procesar_video(ruta)
+    # 2-3. ROI, segmentación y limpieza morfológica frame a frame -> modulos/modulo2_segmentacion.py
+    #      (resultados en resultados/resultados_modulo2/)
+    filas, r_iris = m2.ejecutar_modulo2(ruta)
 
     # 4. Curva temporal y artefactos                -> modulos/modulo3_caracteristicas.py
     curva = m3.curva_desde_modulo2(filas, ruta, r_iris)
