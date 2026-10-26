@@ -4,10 +4,14 @@ Aplicación gráfica del pipeline de pupilometría.
     python app_pupilometria.py
 
 1. Elegir el video con el explorador de archivos.
-2. Marcar la región de interés (el iris con margen) arrastrando un rectángulo.
+2. Marcar la región de interés (el iris con margen) arrastrando un rectángulo. Si en el
+   primer frame el ojo está cerrado, con las flechas se pasa a otro: ese frame de referencia
+   se usa también para la escala y para las figuras del mejoramiento.
 3. Ver la ROI mejorada (módulo 1): es la imagen que recibe la segmentación.
 4. Procesar: corre el pipeline completo (el mismo de pipeline_completo.py) en segundo plano,
    muestra el avance y, al terminar, los parámetros fisiológicos y la curva temporal.
+
+Los colores siguen el tema claro u oscuro del sistema (TEMA, más abajo, permite forzar uno).
 """
 
 import os
@@ -41,9 +45,25 @@ from modulos import modulo2_segmentacion as m2
 
 RAIZ = pipeline.RAIZ
 TIPOS_VIDEO = [("Videos", "*.mov *.MOV *.mp4 *.MP4 *.avi *.AVI *.mkv *.m4v"), ("Todos los archivos", "*.*")]
-COLORES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
-GRIS = "#52514e"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")   # Códigos de color de la terminal
+
+TEMA = None   # None: el del sistema operativo; "claro" u "oscuro" para forzarlo
+
+# Colores de la interfaz en cada tema. Las series de los gráficos son las de la paleta del
+# proyecto, con su versión para fondo oscuro
+PALETAS = {
+    "claro": dict(fondo="#f3f2ee", superficie="#fbfbfa", panel="#e6e5df", texto="#1f1f1e",
+                  texto2="#52514e", tenue="#a5a39b", borde="#d0cec6", acento="#2a78d6",
+                  acento_activo="#2368bd", seleccion="#cfe0f6", grilla="#e4e3dd",
+                  ok="#1a7f4b", aviso="#a86b00", error="#c0392b",
+                  series=["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]),
+    "oscuro": dict(fondo="#1a1a19", superficie="#232322", panel="#2e2e2c", texto="#f0efec",
+                   texto2="#c3c2b7", tenue="#77766f", borde="#41413d", acento="#3987e5",
+                   acento_activo="#4a95ec", seleccion="#28456b", grilla="#33332f",
+                   ok="#4cc38a", aviso="#e0a33a", error="#ff6b5e",
+                   series=["#3987e5", "#d95926", "#199e70", "#c98500"]),
+}
+PALETA = PALETAS["claro"]   # La define la ventana principal al arrancar
 
 
 # ------------------------------------------------------------
@@ -66,6 +86,42 @@ def abrir_en_sistema(ruta):
         subprocess.run(["open", str(ruta)], check=False)
     else:
         subprocess.run(["xdg-open", str(ruta)], check=False)
+
+
+def sistema_en_modo_oscuro():
+    """True si el sistema operativo usa el tema oscuro (Windows, macOS o GNOME en Linux)."""
+    try:
+        if sys.platform == "win32":
+            import winreg
+            clave = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                   r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            return winreg.QueryValueEx(clave, "AppsUseLightTheme")[0] == 0
+        if sys.platform == "darwin":
+            r = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
+                               capture_output=True, text=True, timeout=2)
+            return r.stdout.strip().lower() == "dark"
+        r = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+                           capture_output=True, text=True, timeout=2)
+        return "dark" in r.stdout
+    except Exception:   # Sin la clave, el comando o el escritorio: se usa el tema claro
+        return False
+
+
+def barra_de_titulo_oscura(ventana):
+    """En Windows pinta oscura la barra de título (Tk no lo hace solo; en macOS lo hace el sistema)."""
+    if sys.platform != "win32" or PALETA is not PALETAS["oscuro"]:
+        return
+    try:
+        import ctypes
+        ventana.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(ventana.winfo_id())
+        valor = ctypes.c_int(1)
+        for atributo in (20, 19):   # DWMWA_USE_IMMERSIVE_DARK_MODE (19 en versiones viejas de Windows 10)
+            if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, atributo, ctypes.byref(valor),
+                                                          ctypes.sizeof(valor)) == 0:
+                break
+    except Exception:
+        pass
 
 
 class SalidaACola:
@@ -91,29 +147,44 @@ class SalidaACola:
 # ------------------------------------------------------------
 
 class SelectorROI(tk.Toplevel):
-    """Muestra el primer frame y deja marcar el ROI arrastrando un rectángulo con el mouse."""
+    """Muestra un frame del video y deja marcar el ROI arrastrando un rectángulo con el mouse.
+    Con las flechas se pasa a otro frame, por si en el primero el ojo está cerrado."""
 
-    def __init__(self, padre, frame_rgb, roi=None):
+    def __init__(self, padre, ruta, metadatos, indice=0, roi=None):
         super().__init__(padre)
         self.title("Marcar la región de interés")
         self.transient(padre)
         self.resizable(False, False)
+        self.configure(background=PALETA["fondo"])
         self.resultado = None
-        self._alto, self._ancho = frame_rgb.shape[:2]
+        self.video, _ = m0.abrir_video(ruta)
+        self.fps = metadatos["fps"]
+        self.total = metadatos["cantidad_frames"]
+        self.posicion = 0          # Frame que devuelve el próximo read()
+        self.objetivo = self.indice = None
+        self._pendiente = False
 
-        # El frame se achica para que entre en la pantalla
-        self.foto, self.escala = a_foto(frame_rgb, int(self.winfo_screenwidth() * 0.8),
-                                        int(self.winfo_screenheight() * 0.72))
+        self.frame_rgb = self._leer(indice)
+        self.indice = indice
+        if self.frame_rgb is None:   # El frame guardado no se pudo leer: se arranca del primero
+            self.frame_rgb, self.indice = self._leer(0), 0
+        self.objetivo = self.indice
+
+        # El frame se achica para que entre en la pantalla (todos los frames tienen el mismo tamaño)
+        self.foto, self.escala = a_foto(self.frame_rgb, int(self.winfo_screenwidth() * 0.8),
+                                        int(self.winfo_screenheight() * 0.66))
 
         ttk.Label(self, text="Arrastrá un rectángulo que encierre el IRIS con un poco de margen.",
                   style="Dato.TLabel", padding=(12, 10, 12, 4)).pack(anchor="w")
-        ttk.Label(self, text="Podés volver a arrastrar para corregirlo. Enter confirma, Esc cancela.",
+        ttk.Label(self, text="Si en este frame el ojo está cerrado o movido, pasá a otro con ◀ ▶ "
+                             "(o con las flechas del teclado; con Shift, de a 1 s). "
+                             "Enter confirma, Esc cancela.",
                   style="Sub.TLabel", padding=(12, 0, 12, 8)).pack(anchor="w")
 
-        self.lienzo = tk.Canvas(self, width=self.foto.width(), height=self.foto.height(),
-                                cursor="crosshair", highlightthickness=0)
+        self.lienzo = tk.Canvas(self, width=self.foto.width(), height=self.foto.height(), cursor="crosshair",
+                                highlightthickness=0, background=PALETA["fondo"])
         self.lienzo.pack(padx=12)
-        self.lienzo.create_image(0, 0, anchor="nw", image=self.foto)
+        self.imagen = self.lienzo.create_image(0, 0, anchor="nw", image=self.foto)
         self.rectangulo = None
         self.inicio = None
         if roi:
@@ -124,6 +195,25 @@ class SelectorROI(tk.Toplevel):
         self.lienzo.bind("<B1-Motion>", self._arrastrar)
         self.lienzo.bind("<ButtonRelease-1>", self._arrastrar)
 
+        # Navegación entre frames
+        un_segundo = max(1, int(round(self.fps)))
+        navegacion = ttk.Frame(self, padding=(12, 10, 12, 0))
+        navegacion.pack()
+        self.botones = []
+        for texto, paso in (("◀◀ 1 s", -un_segundo), ("◀", -1), (None, 0), ("▶", 1), ("1 s ▶▶", un_segundo)):
+            if texto is None:
+                self.lbl_frame = ttk.Label(navegacion, style="Dato.TLabel", width=30, anchor="center")
+                self.lbl_frame.pack(side="left", padx=10)
+                continue
+            boton = ttk.Button(navegacion, text=texto, width=7 if len(texto) > 2 else 3,
+                               command=lambda p=paso: self._mover(p))
+            boton.pack(side="left", padx=2)
+            self.botones.append((boton, paso))
+        self.bind("<Left>", lambda _: self._mover(-1))
+        self.bind("<Right>", lambda _: self._mover(1))
+        self.bind("<Shift-Left>", lambda _: self._mover(-un_segundo))
+        self.bind("<Shift-Right>", lambda _: self._mover(un_segundo))
+
         pie = ttk.Frame(self, padding=12)
         pie.pack(fill="x")
         self.etiqueta = ttk.Label(pie, style="Sub.TLabel")
@@ -133,16 +223,67 @@ class SelectorROI(tk.Toplevel):
         self.bind("<Return>", lambda _: self.confirmar())
         self.bind("<Escape>", lambda _: self.destroy())
         self._actualizar_etiqueta()
+        self._actualizar_frame()
 
+        barra_de_titulo_oscura(self)
         self.grab_set()   # Ventana modal: hay que confirmar o cancelar para volver
         self.focus_set()
+
+    # ---------------- Frames ----------------
+
+    def _leer(self, indice):
+        """Frame `indice` en RGB, o None si no se puede leer. Avanza leyendo si está cerca y salta si no."""
+        if 0 <= indice - self.posicion <= 30:
+            for _ in range(indice - self.posicion):
+                self.video.grab()
+        else:
+            self.video.set(cv2.CAP_PROP_POS_FRAMES, indice)
+        ok, bgr = self.video.read()
+        if not ok:
+            self.posicion = -1000   # Posición desconocida: el próximo pedido salta
+            return None
+        self.posicion = indice + 1
+        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+    def _mover(self, paso):
+        # Solo se anota a dónde ir; si se mantiene apretada una flecha se muestra el último pedido
+        self.objetivo = min(max(self.objetivo + paso, 0), self.total - 1)
+        if not self._pendiente:
+            self._pendiente = True
+            self.after(1, self._ir_al_objetivo)
+
+    def _ir_al_objetivo(self):
+        self._pendiente = False
+        if self.objetivo == self.indice:
+            return
+        rgb = self._leer(self.objetivo)
+        if rgb is None:   # Pasado el último frame real (el encabezado puede informar de más)
+            self.total = min(self.total, self.objetivo)
+            self.objetivo = self.indice
+            self.bell()
+        else:
+            self.frame_rgb, self.indice = rgb, self.objetivo
+            alto, ancho = rgb.shape[:2]
+            tam = (max(1, int(ancho * self.escala)), max(1, int(alto * self.escala)))
+            self.foto = ImageTk.PhotoImage(Image.fromarray(rgb).resize(tam, Image.BILINEAR))
+            self.lienzo.itemconfigure(self.imagen, image=self.foto)   # El rectángulo queda encima
+        self._actualizar_frame()
+
+    def _actualizar_frame(self):
+        self.lbl_frame.configure(text=f"Frame {self.indice} de {self.total}  ·  "
+                                      f"t = {ui.numero(self.indice / self.fps, 2, 's')}")
+        for boton, paso in self.botones:   # En el primer o el último frame no se puede seguir en esa dirección
+            fuera = (paso < 0 and self.indice == 0) or (paso > 0 and self.indice >= self.total - 1)
+            boton.state(["disabled"] if fuera else ["!disabled"])
+
+    # ---------------- Rectángulo ----------------
 
     def _limitar(self, x, y):
         return min(max(x, 0), self.foto.width() - 1), min(max(y, 0), self.foto.height() - 1)
 
     def _dibujar(self, x0, y0, x1, y1):
         if self.rectangulo is None:
-            self.rectangulo = self.lienzo.create_rectangle(x0, y0, x1, y1, outline=COLORES[1], width=2)
+            self.rectangulo = self.lienzo.create_rectangle(x0, y0, x1, y1, outline=PALETA["series"][1], width=2)
         else:
             self.lienzo.coords(self.rectangulo, x0, y0, x1, y1)
 
@@ -177,8 +318,12 @@ class SelectorROI(tk.Toplevel):
             messagebox.showwarning("Falta el ROI", "Arrastrá un rectángulo sobre el ojo antes de confirmar.",
                                    parent=self)
             return
-        self.resultado = roi
+        self.resultado = (roi, self.indice)
         self.destroy()
+
+    def destroy(self):
+        self.video.release()
+        super().destroy()
 
 
 # ------------------------------------------------------------
@@ -194,7 +339,8 @@ class Aplicacion(tk.Tk):
         self.minsize(1050, 800)
         self._estilos()
 
-        self.ruta = self.metadatos = self.frame0 = self.roi = None
+        self.ruta = self.metadatos = self.frame_ref = self.roi = None
+        self.indice = 0   # Frame de referencia: sobre el que se marca el ROI
         self.cola = queue.Queue()
         self.hilo = None
         self.cola_mejora = queue.Queue()   # Resultados del mejoramiento calculado en segundo plano
@@ -215,23 +361,76 @@ class Aplicacion(tk.Tk):
     # ---------------- Aspecto ----------------
 
     def _estilos(self):
+        global PALETA
+        PALETA = p = PALETAS[TEMA or ("oscuro" if sistema_en_modo_oscuro() else "claro")]
+        # Colores por defecto de los widgets clásicos de Tk (texto del registro, lienzos,
+        # ventanas y la barra de herramientas de matplotlib, que con fondo oscuro usa íconos claros)
+        for opcion, color in {"*Background": p["fondo"], "*Foreground": p["texto"],
+                              "*activeBackground": p["panel"], "*activeForeground": p["texto"],
+                              "*selectBackground": p["seleccion"], "*selectForeground": p["texto"],
+                              "*selectColor": p["panel"], "*highlightBackground": p["fondo"],
+                              "*highlightColor": p["acento"], "*insertBackground": p["texto"],
+                              "*troughColor": p["grilla"], "*disabledForeground": p["tenue"]}.items():
+            self.option_add(opcion, color)
+        self.configure(background=p["fondo"])
+
+        # "clam" es el único tema de ttk que respeta todos los colores en Windows, macOS y Linux;
+        # los nativos ("vista", "aqua") mezclan colores del sistema con los propios y en modo
+        # oscuro quedan textos ilegibles
         estilo = ttk.Style(self)
-        tema = {"win32": "vista", "darwin": "aqua"}.get(sys.platform, "clam")
-        if tema in estilo.theme_names():
-            estilo.theme_use(tema)
+        estilo.theme_use("clam")
         base = tkfont.nametofont("TkDefaultFont")
         base.configure(size=10)
         familia = base.actual("family")
+        plano = lambda color: dict(lightcolor=color, darkcolor=color)   # Sin el relieve 3D de clam
+
+        estilo.configure(".", background=p["fondo"], foreground=p["texto"], fieldbackground=p["superficie"],
+                         bordercolor=p["borde"], troughcolor=p["grilla"], selectbackground=p["seleccion"],
+                         selectforeground=p["texto"], insertcolor=p["texto"], arrowcolor=p["texto2"],
+                         focuscolor=p["acento"], **plano(p["fondo"]))
+        estilo.map(".", foreground=[("disabled", p["tenue"])])
+
         estilo.configure("Titulo.TLabel", font=(familia, 17, "bold"))
-        estilo.configure("Sub.TLabel", foreground=GRIS)
+        estilo.configure("Sub.TLabel", foreground=p["texto2"])
         estilo.configure("Dato.TLabel", font=(familia, 10, "bold"))
-        estilo.configure("Flecha.TLabel", font=(familia, 16), foreground=GRIS)
-        estilo.configure("Accion.TButton", font=(familia, 11, "bold"), padding=(10, 8))
-        estilo.configure("TLabelframe.Label", font=(familia, 10, "bold"))
-        estilo.configure("Treeview", rowheight=26)
-        # Barra de progreso azul sobre fondo claro (en Windows y macOS se usa la nativa)
-        estilo.configure("Horizontal.TProgressbar", background=COLORES[0], troughcolor="#e4e3dd",
-                         bordercolor="#e4e3dd", lightcolor=COLORES[0], darkcolor=COLORES[0])
+        estilo.configure("Flecha.TLabel", font=(familia, 16), foreground=p["texto2"])
+        estilo.configure("TLabelframe", bordercolor=p["borde"], **plano(p["fondo"]))
+        estilo.configure("TLabelframe.Label", foreground=p["texto"], font=(familia, 10, "bold"))
+
+        estilo.configure("TButton", background=p["panel"], bordercolor=p["borde"], padding=(10, 5),
+                         **plano(p["panel"]))
+        estilo.map("TButton", background=[("disabled", p["fondo"]), ("pressed", p["borde"]), ("active", p["borde"])],
+                   lightcolor=[("disabled", p["fondo"]), ("pressed", p["borde"]), ("active", p["borde"])],
+                   darkcolor=[("disabled", p["fondo"]), ("pressed", p["borde"]), ("active", p["borde"])],
+                   foreground=[("disabled", p["tenue"])])
+        estilo.configure("Accion.TButton", font=(familia, 11, "bold"), padding=(10, 8), background=p["acento"],
+                         foreground="#ffffff", bordercolor=p["acento"], **plano(p["acento"]))
+        estilo.map("Accion.TButton",
+                   background=[("disabled", p["panel"]), ("pressed", p["acento_activo"]), ("active", p["acento_activo"])],
+                   lightcolor=[("disabled", p["panel"]), ("pressed", p["acento_activo"]), ("active", p["acento_activo"])],
+                   darkcolor=[("disabled", p["panel"]), ("pressed", p["acento_activo"]), ("active", p["acento_activo"])],
+                   bordercolor=[("disabled", p["borde"])], foreground=[("disabled", p["tenue"])])
+
+        estilo.configure("TNotebook", bordercolor=p["borde"], tabmargins=(0, 0, 0, 0), **plano(p["fondo"]))
+        estilo.configure("TNotebook.Tab", background=p["panel"], foreground=p["texto2"], bordercolor=p["borde"],
+                         padding=(12, 5), **plano(p["panel"]))
+        estilo.map("TNotebook.Tab", background=[("selected", p["fondo"]), ("active", p["borde"])],
+                   lightcolor=[("selected", p["fondo"])], darkcolor=[("selected", p["fondo"])],
+                   foreground=[("selected", p["texto"]), ("disabled", p["tenue"])])
+
+        estilo.configure("Treeview", background=p["superficie"], fieldbackground=p["superficie"],
+                         foreground=p["texto"], bordercolor=p["borde"], rowheight=26, **plano(p["superficie"]))
+        estilo.map("Treeview", background=[("selected", p["seleccion"])], foreground=[("selected", p["texto"])])
+        estilo.configure("Treeview.Heading", background=p["panel"], foreground=p["texto"], bordercolor=p["borde"],
+                         font=(familia, 10, "bold"), **plano(p["panel"]))
+        estilo.map("Treeview.Heading", background=[("active", p["borde"])])
+
+        estilo.configure("Horizontal.TProgressbar", background=p["acento"], troughcolor=p["grilla"],
+                         bordercolor=p["grilla"], **plano(p["acento"]))
+        estilo.configure("TScrollbar", background=p["panel"], troughcolor=p["superficie"], bordercolor=p["borde"],
+                         arrowcolor=p["texto2"], **plano(p["panel"]))
+        estilo.map("TScrollbar", background=[("active", p["borde"])])
+        barra_de_titulo_oscura(self)
 
     def _armar_ventana(self):
         cabecera = ttk.Frame(self, padding=(18, 14, 18, 6))
@@ -318,16 +517,17 @@ class Aplicacion(tk.Tk):
         pestana.rowconfigure(0, weight=1)
         pestana.columnconfigure(0, weight=1)
         self.texto = tk.Text(pestana, wrap="none", font="TkFixedFont", state="disabled", relief="flat",
-                             padx=10, pady=8, background="#fbfbfa")
+                             padx=10, pady=8, background=PALETA["superficie"], foreground=PALETA["texto"],
+                             highlightthickness=0)
         barra_y = ttk.Scrollbar(pestana, orient="vertical", command=self.texto.yview)
         barra_x = ttk.Scrollbar(pestana, orient="horizontal", command=self.texto.xview)
         self.texto.configure(yscrollcommand=barra_y.set, xscrollcommand=barra_x.set)
         self.texto.grid(row=0, column=0, sticky="nsew")
         barra_y.grid(row=0, column=1, sticky="ns")
         barra_x.grid(row=1, column=0, sticky="ew")
-        self.texto.tag_configure("ok", foreground="#1a7f4b")
-        self.texto.tag_configure("aviso", foreground="#a86b00")
-        self.texto.tag_configure("error", foreground="#c0392b")
+        self.texto.tag_configure("ok", foreground=PALETA["ok"])
+        self.texto.tag_configure("aviso", foreground=PALETA["aviso"])
+        self.texto.tag_configure("error", foreground=PALETA["error"])
         self.texto.tag_configure("titulo", font=(tkfont.nametofont("TkFixedFont").actual("family"), 10, "bold"))
 
     def _armar_resultados(self):
@@ -358,8 +558,9 @@ class Aplicacion(tk.Tk):
 
         grafico = ttk.Frame(pestana)
         grafico.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
-        self.figura = Figure(figsize=(7, 4), dpi=100, layout="constrained")
+        self.figura = Figure(figsize=(7, 4), dpi=100, layout="constrained", facecolor=PALETA["superficie"])
         self.lienzo_figura = FigureCanvasTkAgg(self.figura, master=grafico)
+        self.lienzo_figura.get_tk_widget().configure(background=PALETA["superficie"], highlightthickness=0)
         barra = NavigationToolbar2Tk(self.lienzo_figura, grafico, pack_toolbar=False)
         barra.update()
         barra.pack(side="bottom", fill="x")
@@ -373,9 +574,17 @@ class Aplicacion(tk.Tk):
             self.cargar_video(Path(ruta))
 
     def cargar_video(self, ruta):
+        ruta = Path(ruta)
+        indice = m2.frame_referencia_guardado(ruta.name) or 0   # El elegido en una corrida anterior
         try:
             video, metadatos = m0.abrir_video(ruta)
+            if indice:
+                video.set(cv2.CAP_PROP_POS_FRAMES, indice)
             ok, bgr = video.read()
+            if not ok and indice:   # Si ese frame no se puede leer, se vuelve al primero
+                indice = 0
+                video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ok, bgr = video.read()
             video.release()
             if not ok:
                 raise ValueError("No se pudo leer el primer frame")
@@ -383,8 +592,8 @@ class Aplicacion(tk.Tk):
             messagebox.showerror("No se pudo abrir el video", str(e))
             return
 
-        self.ruta, self.metadatos = Path(ruta), metadatos
-        self.frame0 = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        self.ruta, self.metadatos, self.indice = ruta, metadatos, indice
+        self.frame_ref = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         self.lbl_video.configure(text=self.ruta.name)
         self.lbl_meta.configure(text=f"{metadatos['ancho']} x {metadatos['alto']} px  ·  "
                                      f"{ui.numero(metadatos['fps'], 1, 'fps')}  ·  "
@@ -402,17 +611,20 @@ class Aplicacion(tk.Tk):
     # ---------------- 2. ROI ----------------
 
     def marcar_roi(self):
-        selector = SelectorROI(self, self.frame0, self.roi)
+        selector = SelectorROI(self, self.ruta, self.metadatos, self.indice, self.roi)
         self.wait_window(selector)
         if selector.resultado:
-            self.roi = selector.resultado
-            m2.guardar_roi(self.ruta.name, m2.ROI(*self.roi))   # El pipeline lo toma de roi.json
+            self.roi, self.indice = selector.resultado
+            self.frame_ref = selector.frame_rgb
+            # El pipeline toma el ROI de roi.json y el frame de referencia de frames_referencia.json
+            m2.guardar_roi(self.ruta.name, m2.ROI(*self.roi))
+            m2.guardar_frame_referencia(self.ruta.name, self.indice)
             self._mostrar_vista_previa()
             self._calcular_mejora()
             self._actualizar_estado()
 
     def _mostrar_vista_previa(self):
-        vista = self.frame0.copy()
+        vista = self.frame_ref.copy()
         if self.roi:
             x, y, w, h = self.roi
             grosor = max(2, vista.shape[1] // 200)
@@ -423,12 +635,13 @@ class Aplicacion(tk.Tk):
         recorte = None
         if self.roi:
             x, y, w, h = self.roi
-            recorte = self.frame0[max(0, y):y + h, max(0, x):x + w]
+            recorte = self.frame_ref[max(0, y):y + h, max(0, x):x + w]
         if recorte is not None and recorte.size:
             self._foto_roi, _ = a_foto(recorte, 180, 110, ampliar_hasta=3.0)
             self.img_roi.configure(image=self._foto_roi, text="")
-            self.lbl_roi.configure(text=f"x = {self.roi[0]}, y = {self.roi[1]}, "
-                                        f"{self.roi[2]} x {self.roi[3]} px (guardado en roi.json)")
+            self.lbl_roi.configure(text=f"x = {self.roi[0]}, y = {self.roi[1]}, {self.roi[2]} x {self.roi[3]} px, "
+                                        f"marcado en el frame {self.indice} "
+                                        f"(t = {ui.numero(self.indice / self.metadatos['fps'], 2, 's')})")
             self.btn_roi.configure(text="Cambiar ROI…")
         else:
             self._foto_roi = None
@@ -439,20 +652,20 @@ class Aplicacion(tk.Tk):
     # ---------------- 3. Mejoramiento ----------------
 
     def _calcular_mejora(self):
-        """Mejoramiento del primer frame (Módulo 1) en segundo plano: lo mismo que hace el paso 2 del pipeline."""
+        """Mejoramiento del frame de referencia (Módulo 1) en segundo plano: lo mismo que hace el paso 2 del pipeline."""
         self._version_mejora += 1
         if self.roi is None:
             self.mejorando = False
             self._mensaje_mejora("Cuando haya un ROI, acá se ven los pasos del mejoramiento.")
             return
-        version, ruta, roi = self._version_mejora, self.ruta, self.roi
+        version, ruta, roi, indice = self._version_mejora, self.ruta, self.roi, self.indice
         arrancar = not self.mejorando
         self.mejorando = True
         self._mensaje_mejora("Calculando el mejoramiento del ROI…")
 
         def trabajo():
             try:
-                preparacion = m2.preparar(ruta, rect=roi)          # ROI, escala y resolución
+                preparacion = m2.preparar(ruta, rect=roi, frame_referencia=indice)   # ROI, escala y resolución
                 _, mejora, _ = m2.frame_mejorado(ruta, preparacion)
                 self.cola_mejora.put((version, mejora, None))
             except Exception as e:
@@ -541,7 +754,7 @@ class Aplicacion(tk.Tk):
         try:
             pipeline.MOSTRAR_PASOS = False      # Los gráficos se muestran en la ventana
             pipeline.USAR_ROI_GUARDADO = True   # El ROI marcado acá ya está en roi.json
-            curva, parametros = pipeline.ejecutar_pipeline(str(self.ruta))
+            curva, parametros = pipeline.ejecutar_pipeline(str(self.ruta), frame_referencia=self.indice)
             self.cola.put(("fin", (curva, parametros)))
         except Exception as e:
             traceback.print_exc()
@@ -634,37 +847,43 @@ class Aplicacion(tk.Tk):
         self._dibujar_curva(curva, parametros)
 
     def _dibujar_curva(self, curva, parametros):
+        p = PALETA
+        serie = p["series"]
         self.figura.clear()
+        self.figura.set_facecolor(p["superficie"])
         eje_d, eje_b = self.figura.subplots(2, 1, sharex=True, height_ratios=[3, 1])
         t = curva["t_s"]
 
-        eje_d.plot(t, curva["diametro"], color="0.75", linewidth=1, label="Medido")
+        eje_d.plot(t, curva["diametro"], color=p["tenue"], linewidth=1, label="Medido")
         if "artefacto" in curva:
             artefacto = curva["artefacto"].astype(bool)
-            eje_d.plot(t[artefacto], curva["diametro"][artefacto], "x", color="#c0392b", markersize=4,
+            eje_d.plot(t[artefacto], curva["diametro"][artefacto], "x", color=p["error"], markersize=4,
                        label="Artefacto")
         if "diametro_suave" in curva:
-            eje_d.plot(t, curva["diametro_suave"], color=COLORES[0], linewidth=2, label="Limpio y suavizado")
-        eje_d.set_ylabel("Diámetro (px)", color=GRIS)
-        eje_b.plot(t, curva["brillo"], color=COLORES[1], linewidth=1.5)
-        eje_b.set_ylabel("Brillo", color=GRIS)
-        eje_b.set_xlabel("Tiempo (s)", color=GRIS)
+            eje_d.plot(t, curva["diametro_suave"], color=serie[0], linewidth=2, label="Limpio y suavizado")
+        eje_d.set_ylabel("Diámetro (px)", color=p["texto2"])
+        eje_b.plot(t, curva["brillo"], color=serie[1], linewidth=1.5)
+        eje_b.set_ylabel("Brillo", color=p["texto2"])
+        eje_b.set_xlabel("Tiempo (s)", color=p["texto2"])
 
-        marcas = [("t_estimulo_s", "Estímulo", GRIS, "--"), ("t_inicio_s", "Inicio de la respuesta", COLORES[2], ":"),
-                  ("t_extremo_s", "Extremo", COLORES[1], ":")]
+        marcas = [("t_estimulo_s", "Estímulo", p["texto2"], "--"), ("t_inicio_s", "Inicio de la respuesta", serie[2], ":"),
+                  ("t_extremo_s", "Extremo", serie[1], ":")]
         for clave, nombre, color, estilo in marcas:
             valor = parametros.get(clave, np.nan)
             if np.isfinite(valor):
                 for eje in (eje_d, eje_b):
                     eje.axvline(valor, color=color, linestyle=estilo, linewidth=1.3,
                                 label=nombre if eje is eje_d else None)
-        eje_d.legend(loc="best", fontsize=8, frameon=False)
-        eje_d.set_title(f"Curva temporal · {self.ruta.name}", fontweight="bold", fontsize=11)
+        eje_d.legend(loc="best", fontsize=8, frameon=False, labelcolor=p["texto"])
+        eje_d.set_title(f"Curva temporal · {self.ruta.name}", fontweight="bold", fontsize=11, color=p["texto"])
         for eje in (eje_d, eje_b):
+            eje.set_facecolor(p["superficie"])
             for lado in ("top", "right"):
                 eje.spines[lado].set_visible(False)
-            eje.grid(color="#e4e3dd", linewidth=0.8)
-            eje.tick_params(colors=GRIS, labelsize=9)
+            for lado in ("left", "bottom"):
+                eje.spines[lado].set_color(p["borde"])
+            eje.grid(color=p["grilla"], linewidth=0.8)
+            eje.tick_params(colors=p["texto2"], labelsize=9)
         self.lienzo_figura.draw()
 
     def abrir_resultados(self):
