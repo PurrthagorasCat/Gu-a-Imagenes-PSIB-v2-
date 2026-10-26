@@ -1,13 +1,9 @@
 """
 Módulo 4 — Compresión de la información de imagen.
 
-Se comparan, sobre el frame original, la ROI o la máscara segmentada:
-  - Huffman (sin pérdida)
-  - RLE con recorrido horizontal y vertical (sin pérdida)
-  - JPEG con factor de calidad Q = 90, 50, 10 y 5 (con pérdida)
-
-Las imágenes se pasan en RGB o en escala de grises (uint8). Las máscaras binarias se
-convierten a 0/255 para que JPEG las trate como una imagen de 8 bits.
+Compara Huffman, RLE (horizontal y vertical) y JPEG (Q = 90, 50, 10 y 5) sobre el frame,
+la ROI o la máscara segmentada. Las imágenes van en RGB o en grises (uint8); las máscaras
+binarias se pasan a 0/255.
 """
 
 import heapq                     # Cola de prioridad para armar el árbol de Huffman
@@ -27,12 +23,22 @@ CALIDADES_JPEG = (90, 50, 10, 5)
 
 
 def a_uint8(imagen):
-    """Las máscaras booleanas pasan a 0/255; el resto se deja como está."""
+    """
+    Pasa las máscaras booleanas a 0/255; el resto lo deja igual.
+
+    Entrada: imagen
+    Salida: imagen uint8
+    """
     return imagen.astype(np.uint8) * 255 if imagen.dtype == bool else imagen
 
 
 def a_gris(imagen):
-    """Escala de grises en float (para gradientes y diferencias)."""
+    """
+    Pasa la imagen a escala de grises en float, para restar y calcular gradientes.
+
+    Entrada: imagen RGB o en grises
+    Salida: array 2D float
+    """
     gris = cv2.cvtColor(imagen, cv2.COLOR_RGB2GRAY) if imagen.ndim == 3 else imagen
     return gris.astype(np.float64)
 
@@ -43,12 +49,11 @@ def a_gris(imagen):
 
 def longitudes_huffman(frecuencias):
     """
-    Longitud del código de Huffman de cada símbolo, a partir de sus frecuencias.
+    Longitud del código de Huffman de cada símbolo. Arma el árbol uniendo siempre los
+    dos nodos menos frecuentes; cada unión le suma un bit a los símbolos de esos nodos.
 
-    Se arma el árbol uniendo siempre los dos nodos menos frecuentes (cola de prioridad).
-    Cada unión agrega un bit al código de todos los símbolos de esos dos nodos, así que
-    los símbolos frecuentes quedan cerca de la raíz y con códigos cortos.
-    Devuelve {símbolo: longitud en bits}.
+    Entrada: frecuencias (array con la cantidad de veces que aparece cada valor 0-255)
+    Salida: diccionario {símbolo: longitud en bits}
     """
     simbolos = [s for s in range(len(frecuencias)) if frecuencias[s] > 0]
     if len(simbolos) == 1:
@@ -71,11 +76,11 @@ def longitudes_huffman(frecuencias):
 
 def codigos_canonicos(longitudes):
     """
-    Códigos binarios de Huffman canónico a partir de las longitudes.
+    Arma los códigos de Huffman canónico a partir de las longitudes. Con este formato
+    alcanza con guardar las 256 longitudes para poder decodificar, sin el árbol.
 
-    Se ordenan los símbolos por longitud y se numeran en binario de forma consecutiva.
-    Así el decodificador puede reconstruir los códigos sabiendo solo la longitud de cada
-    símbolo, y alcanza con guardar esas 256 longitudes en lugar de todo el árbol.
+    Entrada: longitudes (dict de longitudes_huffman)
+    Salida: diccionario {símbolo: código como texto de '0' y '1'}
     """
     codigos = {}
     codigo, longitud_anterior = 0, 0
@@ -89,11 +94,11 @@ def codigos_canonicos(longitudes):
 
 def comprimir_huffman(imagen):
     """
-    Codificación de Huffman de los bytes de la imagen (todos los canales juntos).
+    Codifica con Huffman todos los bytes de la imagen.
 
-    Devuelve un diccionario con los códigos, el tamaño comprimido en bytes (datos más
-    la tabla de 256 longitudes), la longitud media del código y la entropía de la imagen,
-    que es el mínimo teórico de bits por símbolo para un código sin pérdida.
+    Entrada: imagen
+    Salida: diccionario con codigos, bytes (datos + tabla de 256 longitudes),
+            bits_por_simbolo y entropia (mínimo teórico en bits por símbolo)
     """
     datos = a_uint8(imagen).ravel()
     frecuencias = np.bincount(datos, minlength=256)
@@ -109,17 +114,22 @@ def comprimir_huffman(imagen):
 
 
 def codificar_huffman(imagen, codigos):
-    """Cadena de bits ('0' y '1') con el código de cada byte de la imagen."""
+    """
+    Reemplaza cada byte de la imagen por su código.
+
+    Entrada: imagen, codigos (de comprimir_huffman)
+    Salida: texto con los bits
+    """
     return "".join(codigos[v] for v in a_uint8(imagen).ravel().tolist())
 
 
 def decodificar_huffman(bits, codigos, forma):
     """
-    Reconstruye la imagen a partir de la cadena de bits.
+    Reconstruye la imagen leyendo los bits hasta formar un código conocido. Es lenta
+    (va bit por bit); sirve para comprobar que no se pierde información.
 
-    Como ningún código es prefijo de otro, se leen bits hasta formar un código conocido,
-    se emite su símbolo y se empieza de nuevo. Es lento (recorre bit a bit en Python):
-    sirve para comprobar que la codificación no pierde información.
+    Entrada: bits (de codificar_huffman), codigos, forma de la imagen
+    Salida: imagen uint8
     """
     simbolo_de = {c: s for s, c in codigos.items()}
     salida, actual = [], ""
@@ -132,7 +142,12 @@ def decodificar_huffman(bits, codigos, forma):
 
 
 def imprimir_huffman(resultado, imagen):
-    """Muestra por consola el resumen de la codificación de Huffman."""
+    """
+    Imprime la entropía, la longitud media del código y el ratio de compresión.
+
+    Entrada: resultado (de comprimir_huffman), imagen original
+    Salida: nada
+    """
     original = a_uint8(imagen).nbytes
     print("─" * 45)
     print(f"Entropía               : {resultado['entropia']:.3f} bits/símbolo")
@@ -150,7 +165,12 @@ def imprimir_huffman(resultado, imagen):
 # ------------------------------------------------------------
 
 def _orden(direccion):
-    """Orden de recorrido de numpy: "C" recorre por filas, "F" por columnas."""
+    """
+    Orden de recorrido de numpy según la dirección del RLE.
+
+    Entrada: direccion ("horizontal" o "vertical")
+    Salida: "C" (por filas) o "F" (por columnas)
+    """
     if direccion not in ("horizontal", "vertical"):
         raise ValueError("La dirección tiene que ser 'horizontal' o 'vertical'")
     return "C" if direccion == "horizontal" else "F"
@@ -158,13 +178,12 @@ def _orden(direccion):
 
 def rle_codificar(imagen, direccion="horizontal", max_corrida=255):
     """
-    Codifica la imagen como pares (valor, longitud de la corrida).
+    Codifica la imagen como pares (valor, longitud de la corrida), recorriéndola por
+    filas o por columnas, un canal después del otro. La longitud ocupa 1 byte, así que
+    las corridas de más de max_corrida se parten en varios pares.
 
-    Se recorre la imagen fila por fila (horizontal) o columna por columna (vertical), un
-    canal a continuación del otro, y cada tramo de píxeles iguales consecutivos se guarda
-    como un par. La longitud ocupa 1 byte, así que las corridas de más de `max_corrida`
-    píxeles se parten en varios pares. Cada par ocupa 2 bytes (valor y longitud).
-    Devuelve (valores, longitudes).
+    Entrada: imagen, direccion ("horizontal" o "vertical"), max_corrida
+    Salida: (valores, longitudes); cada par ocupa 2 bytes
     """
     imagen = a_uint8(imagen)
     orden = _orden(direccion)
@@ -186,7 +205,12 @@ def rle_codificar(imagen, direccion="horizontal", max_corrida=255):
 
 
 def rle_decodificar(valores, longitudes, forma, direccion="horizontal"):
-    """Reconstruye la imagen repitiendo cada valor tantas veces como indica su longitud."""
+    """
+    Reconstruye la imagen repitiendo cada valor tantas veces como dice su longitud.
+
+    Entrada: valores, longitudes (de rle_codificar), forma de la imagen, direccion
+    Salida: imagen uint8
+    """
     orden = _orden(direccion)
     secuencia = np.repeat(valores, longitudes)
     if len(forma) == 2:
@@ -202,11 +226,10 @@ def rle_decodificar(valores, longitudes, forma, direccion="horizontal"):
 
 def comprimir_jpeg(imagen, calidad):
     """
-    Comprime con JPEG (factor de calidad 1 a 100) y devuelve (imagen reconstruida, bytes).
+    Comprime con JPEG y vuelve a decodificar, para medir la pérdida.
 
-    JPEG divide la imagen en bloques de 8x8, aplica la transformada coseno discreta (DCT)
-    a cada uno y cuantiza los coeficientes: cuanto menor la calidad, más gruesa la
-    cuantización, sobre todo en las frecuencias altas. Los bytes incluyen el encabezado.
+    Entrada: imagen, calidad (1 a 100)
+    Salida: (imagen reconstruida, tamaño en bytes, con el encabezado incluido)
     """
     imagen = a_uint8(imagen)
     color = imagen.ndim == 3
@@ -227,8 +250,11 @@ def comprimir_jpeg(imagen, calidad):
 
 def ssim_color(original, procesada):
     """
-    SSIM que acepta imágenes en color: metricas.ssim trabaja en escala de grises, así que
-    en una imagen RGB se calcula para cada canal por separado y se promedia.
+    SSIM para imágenes en color: metricas.ssim trabaja en grises, así que en RGB se
+    calcula canal por canal y se promedia.
+
+    Entrada: original, procesada
+    Salida: SSIM medio
     """
     if original.ndim == 2:
         return metricas.ssim(original, procesada)
@@ -238,14 +264,13 @@ def ssim_color(original, procesada):
 
 def comparar_metodos(imagen, calidades=CALIDADES_JPEG, verificar_huffman=False):
     """
-    Aplica todos los métodos a la imagen y devuelve (tabla, reconstruidas).
+    Aplica todos los métodos a la imagen y mide cuánto comprime cada uno y cuánto se
+    pierde. RLE se decodifica siempre para verificar que no pierde información; Huffman
+    solo si verificar_huffman es True, porque es lento.
 
-    La tabla tiene una fila por método con: tamaño en bytes, ratio de compresión
-    (tamaño original / comprimido), bits por píxel, PSNR, SSIM y si la reconstrucción
-    es idéntica a la original. `reconstruidas` es {método: imagen reconstruida}.
-
-    RLE se decodifica siempre para comprobar que no pierde información. Huffman solo si
-    `verificar_huffman` es True, porque la decodificación bit a bit es lenta.
+    Entrada: imagen, calidades de JPEG, verificar_huffman
+    Salida: (tabla con bytes, ratio, bits por píxel, PSNR, SSIM y si la reconstrucción es
+            exacta, una fila por método; dict {método: imagen reconstruida})
     """
     imagen = a_uint8(imagen)
     original = imagen.nbytes
@@ -292,16 +317,12 @@ def comparar_metodos(imagen, calidades=CALIDADES_JPEG, verificar_huffman=False):
 
 def indice_bloques(imagen, mascara=None, lado=8):
     """
-    Índice de artefactos de bloque: cuánto más cambia la imagen al cruzar el borde entre
-    dos bloques de `lado` x `lado` que entre vecinos dentro de un mismo bloque.
+    Mide los artefactos de bloque de JPEG: cuánto más saltan los valores entre píxeles
+    vecinos que están en distintos bloques de 8x8 que entre vecinos del mismo bloque.
+    Da cerca de 0 sin artefactos y crece cuando aparecen los bloques.
 
-    Es la diferencia media absoluta entre píxeles vecinos a ambos lados de un borde de
-    bloque menos la de los vecinos dentro de un bloque, en niveles de gris. Sin artefactos
-    vale alrededor de 0; cuando aparecen los bloques de JPEG, los saltos se concentran en
-    los bordes de la grilla y el índice crece. Se usa la diferencia y no el cociente porque
-    con calidades bajas el interior de los bloques queda plano (diferencia casi 0) y el
-    cociente se dispara. Con `mascara`, solo se usan los pares de píxeles que están ambos
-    dentro de ella.
+    Entrada: imagen, mascara (opcional, para usar solo los pares que caen adentro), lado del bloque
+    Salida: diferencia en niveles de gris
     """
     gris = a_gris(imagen)
     alto, ancho = gris.shape
@@ -325,12 +346,10 @@ def indice_bloques(imagen, mascara=None, lado=8):
 
 def regiones_borde_y_uniforme(imagen, percentil_borde=90, percentil_uniforme=30):
     """
-    Máscaras de bordes nítidos y de regiones uniformes según el gradiente de la imagen.
+    Separa los bordes nítidos (gradiente alto) de las zonas uniformes (gradiente bajo).
 
-    Bordes: el 10 % de los píxeles con mayor gradiente (por ejemplo, el contorno
-    pupila-iris y las pestañas). Uniformes: el 30 % con menor gradiente (interior de la
-    pupila, zonas lisas del iris, esclerótica y piel). Se calculan sobre la original y se
-    usan para todas las versiones comprimidas.
+    Entrada: imagen, percentil_borde, percentil_uniforme
+    Salida: (máscara de bordes, máscara de zonas uniformes)
     """
     gris = cv2.GaussianBlur(a_gris(imagen), (5, 5), 0)   # Que el ruido no cuente como borde
     gx = cv2.Sobel(gris, cv2.CV_64F, 1, 0)
@@ -342,13 +361,12 @@ def regiones_borde_y_uniforme(imagen, percentil_borde=90, percentil_uniforme=30)
 
 def analizar_artefactos(imagen, reconstruidas):
     """
-    Para cada versión reconstruida, compara los artefactos en bordes y en zonas uniformes.
+    Compara los artefactos de cada versión en los bordes y en las zonas uniformes. Son
+    valores absolutos: en una zona uniforme un salto chico ya se ve, en un borde se disimula.
 
-    Columnas: índice de bloques en toda la imagen, en los bordes y en las zonas
-    uniformes, y error absoluto medio (en niveles de gris) en bordes y en zonas uniformes.
-    Son valores absolutos: para discutir qué tan visibles son hay que tener en cuenta que
-    en una zona uniforme un salto de pocos niveles ya se ve, porque no hay textura que lo
-    disimule, mientras que en un borde se confunde con el contraste que ya existe.
+    Entrada: imagen original, reconstruidas (de comparar_metodos)
+    Salida: tabla con el índice de bloques (total, bordes y uniforme) y el error medio en
+            bordes y en zonas uniformes, una fila por versión
     """
     imagen = a_uint8(imagen)
     bordes, uniforme = regiones_borde_y_uniforme(imagen)
@@ -371,12 +389,12 @@ def analizar_artefactos(imagen, reconstruidas):
 
 def segmentador_modulo2(imagen_referencia):
     """
-    Devuelve una función que segmenta la pupila de una imagen RGB con el método del
-    módulo 2 (snake + morfología) y devuelve la máscara en el tamaño de esa imagen.
+    Prepara una función que segmenta la pupila con el método del módulo 2. El ojo se
+    ubica una sola vez en la imagen de referencia y se usa esa misma ubicación siempre, así
+    al comparar versiones comprimidas lo único que cambia es la compresión.
 
-    El ojo se ubica una sola vez, sobre `imagen_referencia`, y se usa la misma ubicación
-    para todas las imágenes: así, al comparar versiones comprimidas, la única diferencia
-    es la compresión y no la detección del ojo.
+    Entrada: imagen_referencia (RGB)
+    Salida: función imagen RGB -> máscara binaria del tamaño de la imagen
     """
     # El módulo 2 no es un paquete: se agrega su carpeta al path. Se importa acá adentro
     # porque al importarse desactiva las ventanas de matplotlib; se restaura el backend
@@ -406,11 +424,12 @@ def segmentador_modulo2(imagen_referencia):
 
 def diametro_tras_jpeg(imagen, segmentar, calidades=(50, 10)):
     """
-    Segmenta la pupila en la imagen original y en sus versiones JPEG, y compara el
-    diámetro y el área medidos con los descriptores del módulo 3.
+    Segmenta la pupila en la imagen original y en sus versiones JPEG y compara el
+    diámetro y el área (con los descriptores del módulo 3).
 
-    `segmentar` es una función imagen RGB -> máscara binaria, por ejemplo la que
-    devuelve segmentador_modulo2(imagen). Devuelve una tabla con una fila por versión.
+    Entrada: imagen RGB, segmentar (por ejemplo, de segmentador_modulo2), calidades
+    Salida: tabla con diámetro, área, circularidad y cambio del diámetro (px y %)
+            respecto de la original
     """
     versiones = {"Original": imagen}
     for calidad in calidades:
@@ -434,8 +453,11 @@ def diametro_tras_jpeg(imagen, segmentar, calidades=(50, 10)):
 
 def mostrar_jpeg(imagen, reconstruidas, recuadro=None, titulo=None):
     """
-    Muestra la original y cada versión JPEG y, debajo, la zona `recuadro` = (x, y, ancho,
-    alto) ampliada, sin interpolar, para que se vean los bloques de 8x8.
+    Muestra la original y cada versión JPEG y, abajo, una zona ampliada sin suavizar para
+    que se vean los bloques de 8x8.
+
+    Entrada: imagen, reconstruidas, recuadro (x, y, ancho, alto) de la zona a ampliar, titulo
+    Salida: nada (muestra la figura)
     """
     versiones = {"Original": a_uint8(imagen)}
     versiones.update({m: r for m, r in reconstruidas.items() if m.startswith("JPEG")})
@@ -461,7 +483,12 @@ def mostrar_jpeg(imagen, reconstruidas, recuadro=None, titulo=None):
 
 
 def mostrar_error(imagen, reconstruidas, maximo=20, titulo=None):
-    """Mapas de error absoluto |original - reconstruida| de cada versión JPEG, con la misma escala."""
+    """
+    Mapas del error absoluto de cada versión JPEG, todos con la misma escala.
+
+    Entrada: imagen, reconstruidas, maximo de la escala de colores, titulo
+    Salida: nada (muestra la figura)
+    """
     jpeg = {m: r for m, r in reconstruidas.items() if m.startswith("JPEG")}
     fig, ejes = plt.subplots(1, len(jpeg), figsize=(3.6 * len(jpeg), 3.6), squeeze=False,
                              layout="constrained")
@@ -478,10 +505,11 @@ def mostrar_error(imagen, reconstruidas, maximo=20, titulo=None):
 
 def mostrar_calidad_vs_ratio(tabla, titulo=None):
     """
-    PSNR y SSIM en función del ratio de compresión, en dos gráficos (uno por medida).
+    Grafica PSNR y SSIM en función del ratio de compresión. Los métodos sin pérdida
+    tienen PSNR infinita y se dibujan en una franja arriba marcada con ∞.
 
-    JPEG se dibuja como una curva con cada Q marcado. Los métodos sin pérdida tienen
-    PSNR infinita: se dibujan en una franja arriba del gráfico marcada con ∞.
+    Entrada: tabla (de comparar_metodos), titulo
+    Salida: nada (muestra la figura)
     """
     jpeg = tabla[tabla["tipo"] == "con pérdida"]
     sin_perdida = tabla[tabla["tipo"] == "sin pérdida"]
