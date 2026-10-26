@@ -4,6 +4,8 @@ Módulo 0 — Importación de datos.
 Apertura de los videos (.MOV), lectura de metadatos y frames, y visualización del registro.
 """
 
+import os                        # Rutas alternativas para abrir el video en Windows
+import sys                       # Detectar Windows
 import cv2                       # OpenCV: lectura de video, procesamiento de imágenes y ventanas
 import numpy as np               # Cálculo numérico (arrays, linspace, ceil)
 import matplotlib.pyplot as plt  # Gráficos para mostrar frames sueltos
@@ -25,6 +27,10 @@ def abrir_video(ruta):
     # Se corrobora que el video se haya abierto correctamente
     # ================================================================================== #
     video = cv2.VideoCapture(str(ruta))
+    if not video.isOpened() and sys.platform == "win32" and not str(ruta).isascii():
+        # En Windows, OpenCV puede fallar con rutas con tildes o eñes (p. ej. "Guía imágenes"):
+        # se prueba con la ruta relativa a la carpeta actual, que suele no tenerlas
+        video = cv2.VideoCapture(os.path.relpath(str(ruta)))
     if not video.isOpened():
         # El archivo no existe, la ruta es incorrecta o OpenCV no soporta el formato
         raise FileNotFoundError(f"No se pudo abrir el video: {ruta}")
@@ -41,6 +47,8 @@ def abrir_video(ruta):
     # ================================================================================== #
     alto, ancho, canales = primer_frame.shape
     fps = video.get(cv2.CAP_PROP_FPS)                                # Frames por segundo
+    if not np.isfinite(fps) or fps <= 0:
+        fps = 30.0   # Algunos archivos no informan los fps; se supone 30, como en el módulo 2
     cantidad_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))       # Total de frames (estimado por el encabezado)
     codigo = int(video.get(cv2.CAP_PROP_FOURCC))                     # Códec codificado como un entero de 32 bits
 
@@ -113,7 +121,7 @@ def seleccionar_roi(frame, alto_max=900, ancho_max=1400):
     titulo = "Seleccionar ROI - Enter confirma, c cancela"
     x, y, w, h = cv2.selectROI(titulo, vista, showCrosshair=True, fromCenter=False)
     cv2.destroyAllWindows()
-    cv2.waitKey(1)  # Esta línae es necesario para que la ventana se cierre al usarla desde Jupyter
+    cv2.waitKey(1)  # Esta línea es necesaria para que la ventana se cierre al usarla desde Jupyter
 
     if w == 0 or h == 0:
         # Se canceló o no se arrastró ningún rectángulo

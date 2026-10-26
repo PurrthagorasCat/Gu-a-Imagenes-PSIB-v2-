@@ -7,12 +7,12 @@ Módulo 3 — Extracción de características, textura y dinámica temporal.
     curva = curva_desde_modulo2(filas, ruta_video, r_iris_px)
     curva = limpiar_curva(curva)
     t_estimulo, tipo = detectar_estimulo(curva)
-    parametros = parametros_fisiologicos(curva, t_estimulo, tipo,
-                                         mm_por_px=mm_por_px_desde_iris(r_iris_px))
+    parametros = parametros_fisiologicos(curva, t_estimulo, tipo, mm_por_px=None)   # o la escala calibrada
     guardar_resultados(curva, parametros, carpeta)
 """
 
 import os                        # Rutas de los archivos de salida
+from pathlib import Path         # Carpeta del proyecto, para mostrar rutas cortas
 import cv2                       # OpenCV: componentes conexas, contornos y momentos
 import numpy as np               # Cálculo numérico (arrays, histogramas, estadística)
 import pandas as pd              # Tablas: curva temporal y exportación a CSV
@@ -363,7 +363,7 @@ def radio_iris_modulo2(serie):
     """
     if "pupila_iris" not in serie:
         return np.nan
-    validos =serie["d_pupila_px"].notna() & serie["pupila_iris"].notna() & (serie["pupila_iris"] > 0)
+    validos = serie["d_pupila_px"].notna() & serie["pupila_iris"].notna() & (serie["pupila_iris"] > 0)
     if not validos.any():
         return np.nan
     return float(np.median(serie.loc[validos, "d_pupila_px"] / serie.loc[validos, "pupila_iris"])) / 2
@@ -372,7 +372,11 @@ def radio_iris_modulo2(serie):
 def mm_por_px_desde_iris(r_iris_px, diametro_iris_mm=DIAMETRO_IRIS_MM):
     """
     Escala aproximada suponiendo que el iris mide 11,7 mm (varía cerca de ±5 % entre
-    personas). Sirve para pasar los resultados a mm sin calibrar cada video.
+    personas). Solo sirve si r_iris_px sale de MEDIR el iris.
+
+    Atención: el r_iris_px del módulo 2 no es una medición. Se deduce de la pupila al
+    comienzo del video (r_pupila / 0,45), así que con esa escala la pupila inicial mide
+    siempre 0,45 · 11,7 ≈ 5,3 mm, sea cual sea su tamaño real.
 
     Entrada: r_iris_px, diametro_iris_mm (opcional)
     Salida: mm por píxel (NaN si no hay radio)
@@ -760,7 +764,13 @@ def guardar_resultados(curva, parametros, carpeta="resultados/"):
     curva.to_csv(ruta_curva, index=False)
     # `columns` fija el orden de las columnas y agrega en NaN las que falten
     pd.DataFrame([parametros], columns=COLUMNAS_PARAMETROS).to_csv(ruta_parametros, index=False)
-    print(f"Guardados: {ruta_curva} y {ruta_parametros}")
+    # Ruta relativa a la carpeta del proyecto (si está adentro), para que el mensaje sea corto
+    raiz = Path(__file__).resolve().parent.parent
+    try:
+        donde = Path(carpeta).resolve().relative_to(raiz)
+    except ValueError:
+        donde = Path(carpeta)
+    print(f"Guardados en {donde}: curva_temporal.csv y parametros_fisiologicos.csv")
 
 
 # ------------------------------------------------------------

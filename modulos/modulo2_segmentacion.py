@@ -52,10 +52,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import matplotlib
-if "--anotar" not in sys.argv:
-    matplotlib.use("Agg")    # sin ventanas: las figuras se guardan en archivos
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt   # las figuras se guardan en archivos y se cierran (no se muestran)
 from scipy import ndimage as ndi
 from scipy.ndimage import binary_erosion as _be, binary_dilation as _bd
 from scipy.signal import medfilt
@@ -1245,7 +1242,7 @@ def analizar_frames(path, filas, roi, pedidos, fps, factor=None, r_iris=None, co
     for f in filas_img:
         if f[1] == "2.1":
             print(f"  {f[0]:28s} {f[2]:30s} Dice={f[3]:.3f}")
-    print(f"Resultados de imagen en {OUT_IMAGEN}")
+    print(f"Resultados de imagen en {OUT_IMAGEN.relative_to(RAIZ)}")
     return elegidos
 
 
@@ -1298,7 +1295,7 @@ def guardar_resultados(filas, metricas, stem, fps=30.0):
             print(f"  frame {m['frame']:4d}  Dice={m['dice']:.3f}  IoU={m['iou']:.3f}")
         print(f"  promedio  Dice={np.mean([m['dice'] for m in metricas]):.3f}  "
               f"IoU={np.mean([m['iou'] for m in metricas]):.3f}")
-    print(f"Resultados en {OUT_VIDEO}")
+    print(f"Resultados en {OUT_VIDEO.relative_to(RAIZ)}")
 
 
 # ============================================================================

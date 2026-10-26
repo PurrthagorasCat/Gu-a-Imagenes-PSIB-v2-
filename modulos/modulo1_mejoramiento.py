@@ -7,11 +7,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgb
-from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
-from scipy.ndimage import gaussian_filter1d
-from scipy.signal import find_peaks
-from skimage.filters import threshold_otsu
  
 # ------------------------------------------------------------
 # 1.1 Dimensiones, resolución espacial, cuantización y color
@@ -75,7 +71,7 @@ def cuantizar(imagen, bits):
     """Cuantización uniforme de 8 bits a `bits` bits por canal."""
     niveles = 2 ** bits
     ancho_intervalo = 256 // niveles
-    # División entera para ve a qué intervalo pertenece cada valor
+    # División entera para ver a qué intervalo pertenece cada valor
     indice = imagen // ancho_intervalo
     # Se lleva cada intervalo a su nivel dentro de 0–255 (con 2 bits: 0, 85, 170, 255)
     return np.round(indice * (255 / (niveles - 1))).astype(np.uint8)

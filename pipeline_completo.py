@@ -1,63 +1,141 @@
 """
-Pipeline completo
+Pipeline completo: reflejo fotomotor a partir de un video del ojo.
 
-Entrada : video indicado en RUTA_VIDEO
-Salida  : resultados/curva_temporal.csv          (área/diámetro pupilar frame a frame)
-          resultados/parametros_fisiologicos.csv (latencia, amplitud, velocidades)
+Entrada : el video indicado en RUTA_VIDEO (o el que se pase al ejecutar)
+Salida  : resultados/curva_temporal.csv           (diámetro y área pupilar frame a frame)
+          resultados/parametros_fisiologicos.csv  (latencia, amplitud, velocidades)
+          y una copia de ambos en resultados/por_video/<nombre del video>/
+
+Uso:
+    python pipeline_completo.py                      # usa RUTA_VIDEO
+    python pipeline_completo.py registro_A2.MOV      # otro video de la carpeta videos/
 """
 
-import os
 import sys
-import matplotlib
-import matplotlib.pyplot as plt
+import time
+import traceback
+from pathlib import Path
 
+from modulos import interfaz as ui
 from modulos import modulo0_importacion as m0
+from modulos import modulo2_segmentacion as m2
 from modulos import modulo3_caracteristicas as m3
 
-# El módulo 2, al importarse, desactiva las ventanas de matplotlib (backend "Agg"),
-# así que se guarda el backend actual para restaurarlo después
-_backend = matplotlib.get_backend()
-from modulos import modulo2_segmentacion as m2  # noqa: E402
-plt.switch_backend(_backend)
+# ============================================================
+# CONFIGURACIÓN (lo único que hace falta tocar)
+# ============================================================
 
-RUTA_VIDEO = "videos/registro_A1.MOV"
-CARPETA_RESULTADOS = "resultados/"
+RUTA_VIDEO = "videos/registro_A1.MOV"     # relativa a la carpeta del proyecto, o absoluta
+CARPETA_RESULTADOS = "resultados"
 
-# True: muestra el resultado de cada paso.  False: corre sin ventanas (entrega final)
-MOSTRAR_PASOS = True
+# True: muestra el video y los gráficos (hay que cerrar cada ventana para seguir).
+# False: corre de punta a punta sin ventanas.
+MOSTRAR_PASOS = False
+
+# True: reutiliza el ROI guardado en anotaciones_manuales/roi.json para este video, si existe.
+# False: pide marcar el ROI con el mouse en cada corrida.
+USAR_ROI_GUARDADO = True
+
+# Escala en mm por píxel, si se calibró (por ejemplo, con la regla filmada junto al ojo).
+# None: los resultados quedan en píxeles y en porcentajes.
+MM_POR_PX = None
+
+# ============================================================
+
+RAIZ = Path(__file__).resolve().parent
+EXTENSIONES_VIDEO = {".mov", ".mp4", ".avi", ".mkv", ".m4v"}
 
 
-def ejecutar_pipeline():
-    # El módulo 2 interpreta las rutas relativas desde su propia carpeta: se pasa la absoluta
-    ruta = os.path.abspath(RUTA_VIDEO)
+def resolver_video(ruta):
+    """Ruta absoluta del video: tal cual, relativa a la carpeta del proyecto o dentro de videos/."""
+    ruta = Path(ruta)
+    for candidata in (ruta, RAIZ / ruta, RAIZ / "videos" / ruta):
+        if candidata.is_file():
+            return candidata.resolve()
+    disponibles = sorted(p.name for p in (RAIZ / "videos").glob("*") if p.suffix.lower() in EXTENSIONES_VIDEO)
+    mensaje = f"No se encontró el video '{ruta}'."
+    if disponibles:
+        mensaje += " Videos disponibles en videos/: " + ", ".join(disponibles)
+    raise FileNotFoundError(mensaje)
 
-    # 1. Importación del video
-    video, metadatos = m0.abrir_video(ruta)
-    m0.imprimir_metadatos(metadatos)
-    if MOSTRAR_PASOS:
-        m0.reproducir_video(ruta)
-        m0.mostrar_frames_muestra(video, metadatos)
-    video.release()
 
-    # 2-3. ROI, segmentación y limpieza morfológica frame a frame -> modulos/modulo2_segmentacion.py
-    #      (resultados en resultados/resultados_modulo2/)
-    filas, r_iris = m2.ejecutar_modulo2(ruta)
+def ejecutar_pipeline(ruta_video=RUTA_VIDEO):
+    inicio = time.perf_counter()
+    ruta = resolver_video(ruta_video)
+    carpeta = RAIZ / CARPETA_RESULTADOS
+    carpeta_video = carpeta / "por_video" / ruta.stem
 
-    # 4. Curva temporal y artefactos                -> modulos/modulo3_caracteristicas.py
-    curva = m3.curva_desde_modulo2(filas, ruta, r_iris)
-    curva = m3.limpiar_curva(curva)
+    ui.encabezado("PUPILOMETRÍA · Reflejo fotomotor",
+                  "Procesamiento de Señales e Imágenes Biomédicas · ITBA",
+                  {"Video": ruta.name,
+                   "Resultados": f"{CARPETA_RESULTADOS}/",
+                   "Ventanas": "sí" if MOSTRAR_PASOS else "no",
+                   "ROI": "guardado si existe" if USAR_ROI_GUARDADO else "marcar a mano",
+                   "Inicio": ui.fecha_hora()})
+    total = 5
 
-    # 5. Parámetros fisiológicos                    -> modulos/modulo3_caracteristicas.py
-    t_estimulo, tipo = m3.detectar_estimulo(curva)
-    parametros = m3.parametros_fisiologicos(curva, t_estimulo, tipo,
-                                            mm_por_px=m3.mm_por_px_desde_iris(r_iris))
-    m3.imprimir_parametros(parametros)
-    if MOSTRAR_PASOS:
-        m3.mostrar_curva(curva, parametros=parametros)
+    # 1. Importación del video ----------------------------------------------------------
+    with ui.paso(1, total, "Importación del video (Módulo 0)"):
+        video, metadatos = m0.abrir_video(ruta)
+        ui.tabla({"Resolución": f"{metadatos['ancho']} x {metadatos['alto']} px",
+                  "Frecuencia": ui.numero(metadatos["fps"], 2, "fps"),
+                  "Frames": metadatos["cantidad_frames"],
+                  "Duración": ui.numero(metadatos["duracion_s"], 2, "s"),
+                  "Códec": metadatos["codec"]})
+        if MOSTRAR_PASOS:
+            ui.info("Se abre el video (Espacio: pausa | q: cerrar) y después los frames de muestra.")
+            m0.reproducir_video(ruta)
+            m0.mostrar_frames_muestra(video, metadatos)
+        video.release()
 
-    # 6. Exportar CSV
-    m3.guardar_resultados(curva, parametros, CARPETA_RESULTADOS)
+    # 2. Segmentación frame a frame -------------------------------------------------------
+    with ui.paso(2, total, "Segmentación de la pupila frame a frame (Módulo 2)"):
+        filas, r_iris = m2.ejecutar_modulo2(ruta, usar_roi_guardado=USAR_ROI_GUARDADO)
+
+    # 3. Curva temporal y artefactos ------------------------------------------------------
+    with ui.paso(3, total, "Curva temporal y artefactos (Módulo 3)"):
+        curva = m3.curva_desde_modulo2(filas, ruta, r_iris)
+        curva = m3.limpiar_curva(curva)
+
+    # 4. Estímulo y parámetros fisiológicos -----------------------------------------------
+    with ui.paso(4, total, "Estímulo y parámetros fisiológicos (Módulo 3)"):
+        t_estimulo, tipo = m3.detectar_estimulo(curva)
+        parametros = m3.parametros_fisiologicos(curva, t_estimulo, tipo, mm_por_px=MM_POR_PX)
+        if MOSTRAR_PASOS:
+            ui.info("Se abre el gráfico de la curva temporal (cerrarlo para continuar).")
+            m3.mostrar_curva(curva, parametros=parametros, titulo=ruta.name)
+
+    # 5. Exportación ----------------------------------------------------------------------
+    with ui.paso(5, total, "Exportación de resultados"):
+        m3.guardar_resultados(curva, parametros, carpeta)          # nombres fijos (última corrida)
+        m3.guardar_resultados(curva, parametros, carpeta_video)    # copia por video
+
+    ui.resumen_parametros(parametros)
+    ui.archivos([carpeta / "curva_temporal.csv", carpeta / "parametros_fisiologicos.csv",
+                 carpeta_video, m2.CARPETA_RESULTADOS], raiz=RAIZ)
+    ui.cierre(time.perf_counter() - inicio)
+    return curva, parametros
+
+
+def main():
+    ruta = sys.argv[1] if len(sys.argv) > 1 else RUTA_VIDEO
+    try:
+        ejecutar_pipeline(ruta)
+    except KeyboardInterrupt:
+        print()
+        ui.aviso("Ejecución interrumpida por el usuario")
+        sys.exit(130)
+    except FileNotFoundError as e:   # Error esperable: alcanza con el mensaje
+        print()
+        ui.error(str(e))
+        sys.exit(1)
+    except Exception as e:
+        print()
+        ui.error(str(e) or type(e).__name__)
+        print("\n  Detalle técnico:")
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    ejecutar_pipeline()
+    main()
