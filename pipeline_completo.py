@@ -42,6 +42,10 @@ MOSTRAR_PASOS = False
 # False: pide marcar el ROI con el mouse en cada corrida.
 USAR_ROI_GUARDADO = True
 
+# Frame sobre el que se marca el ROI y desde el que se mide la escala (por si el video
+# empieza con un parpadeo). None: el elegido al marcar el ROI en la aplicación, o el primero.
+FRAME_REFERENCIA = None
+
 # Escala en mm por píxel, si se calibró (por ejemplo, con la regla filmada junto al ojo).
 # None: los resultados quedan en píxeles y en porcentajes.
 MM_POR_PX = None
@@ -65,7 +69,7 @@ def resolver_video(ruta):
     raise FileNotFoundError(mensaje)
 
 
-def ejecutar_pipeline(ruta_video=RUTA_VIDEO):
+def ejecutar_pipeline(ruta_video=RUTA_VIDEO, frame_referencia=None):
     inicio = time.perf_counter()
     ruta = resolver_video(ruta_video)
     carpeta = RAIZ / CARPETA_RESULTADOS
@@ -97,15 +101,18 @@ def ejecutar_pipeline(ruta_video=RUTA_VIDEO):
     # 2. ROI y mejoramiento -------------------------------------------------------------
     figura_mejora = carpeta / "resultados_modulo1" / f"{ruta.stem}_mejoramiento.png"
     with ui.paso(2, total, "ROI y mejoramiento (Módulo 1)"):
-        preparacion = m2.preparar(ruta, nuevo_roi=m2.PEDIR_ROI_SIEMPRE and not USAR_ROI_GUARDADO)
-        recorte, mejora, _ = m2.frame_mejorado(ruta, preparacion)   # primer frame, para mostrar
-        f2 = "sin contraste en el primer frame" if mejora["umbral"] is None else mejora["umbral"]
-        ui.tabla({"ROI procesado": f"{recorte.shape[1]} x {recorte.shape[0]} px, en escala de grises",
+        preparacion = m2.preparar(ruta, nuevo_roi=m2.PEDIR_ROI_SIEMPRE and not USAR_ROI_GUARDADO,
+                                  frame_referencia=FRAME_REFERENCIA if frame_referencia is None else frame_referencia)
+        k = preparacion["frame_referencia"]
+        recorte, mejora, _ = m2.frame_mejorado(ruta, preparacion)   # frame de referencia, para mostrar
+        f2 = "sin contraste en este frame" if mejora["umbral"] is None else mejora["umbral"]
+        ui.tabla({"Frame de referencia": f"{k} (t = {ui.numero(k / metadatos['fps'], 2, 's')})",
+                  "ROI procesado": f"{recorte.shape[1]} x {recorte.shape[0]} px, en escala de grises",
                   "Suavizado": f"gaussiano de {mejora['ventana']} x {mejora['ventana']} px",
                   "Rango de interés": f"[0, {f2}] (F2 por Otsu multinivel, se recalcula en cada frame)"})
         if MOSTRAR_PASOS:
             ui.info("Se abre la figura del mejoramiento (cerrarla para continuar).")
-        m1.mostrar_mejoramiento(recorte, mejora, titulo=f"{ruta.name}: mejoramiento del ROI (primer frame)",
+        m1.mostrar_mejoramiento(recorte, mejora, titulo=f"{ruta.name}: mejoramiento del ROI (frame {k})",
                                 destino=figura_mejora, mostrar=MOSTRAR_PASOS)
 
     # 3. Segmentación frame a frame -------------------------------------------------------
