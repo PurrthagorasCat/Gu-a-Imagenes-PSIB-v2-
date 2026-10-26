@@ -11,7 +11,8 @@ Aplicación gráfica del pipeline de pupilometría.
 4. Procesar: corre el pipeline completo (el mismo de pipeline_completo.py) en segundo plano,
    muestra el avance y, al terminar, los parámetros fisiológicos y la curva temporal.
 
-Los colores siguen el tema claro u oscuro del sistema (TEMA, más abajo, permite forzar uno).
+Los colores siguen el tema claro u oscuro del sistema; el botón de arriba a la derecha cambia de
+uno a otro, y TEMA (más abajo) permite fijar con cuál arranca.
 """
 
 import os
@@ -107,19 +108,22 @@ def sistema_en_modo_oscuro():
         return False
 
 
-def barra_de_titulo_oscura(ventana):
-    """En Windows pinta oscura la barra de título (Tk no lo hace solo; en macOS lo hace el sistema)."""
-    if sys.platform != "win32" or PALETA is not PALETAS["oscuro"]:
+def barra_de_titulo(ventana):
+    """En Windows pinta la barra de título oscura o clara según el tema (Tk no lo hace solo;
+    en macOS la pinta el sistema)."""
+    if sys.platform != "win32":
         return
     try:
         import ctypes
         ventana.update_idletasks()
         hwnd = ctypes.windll.user32.GetParent(ventana.winfo_id())
-        valor = ctypes.c_int(1)
+        valor = ctypes.c_int(1 if PALETA is PALETAS["oscuro"] else 0)
         for atributo in (20, 19):   # DWMWA_USE_IMMERSIVE_DARK_MODE (19 en versiones viejas de Windows 10)
             if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, atributo, ctypes.byref(valor),
                                                           ctypes.sizeof(valor)) == 0:
                 break
+        # Redibuja el marco para que el cambio se vea sin mover la ventana
+        ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020)
     except Exception:
         pass
 
@@ -225,7 +229,7 @@ class SelectorROI(tk.Toplevel):
         self._actualizar_etiqueta()
         self._actualizar_frame()
 
-        barra_de_titulo_oscura(self)
+        barra_de_titulo(self)
         self.grab_set()   # Ventana modal: hay que confirmar o cancelar para volver
         self.focus_set()
 
@@ -348,6 +352,7 @@ class Aplicacion(tk.Tk):
         self._version_mejora = 0           # Para descartar resultados de un ROI anterior
         self.paso_actual = 0
         self.total_pasos = 6
+        self._resultados = None            # (curva, parámetros) del último procesamiento, para redibujar
         self._resto_de_linea = ""
         self._inicio = 0.0
 
@@ -361,8 +366,22 @@ class Aplicacion(tk.Tk):
     # ---------------- Aspecto ----------------
 
     def _estilos(self):
+        base = tkfont.nametofont("TkDefaultFont")
+        base.configure(size=10)
+        self.familia = base.actual("family")
+        # "clam" es el único tema de ttk que respeta todos los colores en Windows, macOS y Linux;
+        # los nativos ("vista", "aqua") mezclan colores del sistema con los propios y en modo
+        # oscuro quedan textos ilegibles
+        self.estilo = ttk.Style(self)
+        self.estilo.theme_use("clam")
+        self._aplicar_tema(TEMA or ("oscuro" if sistema_en_modo_oscuro() else "claro"))
+
+    def _aplicar_tema(self, nombre):
+        """Colores del tema `nombre` ("claro" u "oscuro") en los estilos de ttk, que se actualizan
+        solos, y en los widgets clásicos de Tk que se creen de acá en adelante."""
         global PALETA
-        PALETA = p = PALETAS[TEMA or ("oscuro" if sistema_en_modo_oscuro() else "claro")]
+        self.tema = nombre
+        PALETA = p = PALETAS[nombre]
         # Colores por defecto de los widgets clásicos de Tk (texto del registro, lienzos,
         # ventanas y la barra de herramientas de matplotlib, que con fondo oscuro usa íconos claros)
         for opcion, color in {"*Background": p["fondo"], "*Foreground": p["texto"],
@@ -374,14 +393,7 @@ class Aplicacion(tk.Tk):
             self.option_add(opcion, color)
         self.configure(background=p["fondo"])
 
-        # "clam" es el único tema de ttk que respeta todos los colores en Windows, macOS y Linux;
-        # los nativos ("vista", "aqua") mezclan colores del sistema con los propios y en modo
-        # oscuro quedan textos ilegibles
-        estilo = ttk.Style(self)
-        estilo.theme_use("clam")
-        base = tkfont.nametofont("TkDefaultFont")
-        base.configure(size=10)
-        familia = base.actual("family")
+        estilo, familia = self.estilo, self.familia
         plano = lambda color: dict(lightcolor=color, darkcolor=color)   # Sin el relieve 3D de clam
 
         estilo.configure(".", background=p["fondo"], foreground=p["texto"], fieldbackground=p["superficie"],
@@ -430,14 +442,57 @@ class Aplicacion(tk.Tk):
         estilo.configure("TScrollbar", background=p["panel"], troughcolor=p["superficie"], bordercolor=p["borde"],
                          arrowcolor=p["texto2"], **plano(p["panel"]))
         estilo.map("TScrollbar", background=[("active", p["borde"])])
-        barra_de_titulo_oscura(self)
+        barra_de_titulo(self)
+
+    def cambiar_tema(self):
+        """Pasa de modo claro a oscuro o al revés. Los widgets de ttk cambian solos; los clásicos de
+        Tk (el registro y el gráfico) se recolorean acá, y la barra del gráfico se rehace."""
+        self._aplicar_tema("claro" if self.tema == "oscuro" else "oscuro")
+        p = PALETA
+        self.texto.configure(background=p["superficie"], foreground=p["texto"], insertbackground=p["texto"],
+                             selectbackground=p["seleccion"], selectforeground=p["texto"])
+        for etiqueta in ("ok", "aviso", "error"):
+            self.texto.tag_configure(etiqueta, foreground=p[etiqueta])
+        self.lienzo_figura.get_tk_widget().configure(background=p["superficie"])
+        self._armar_barra()
+        if self._resultados is not None:
+            self._dibujar_curva(*self._resultados)
+        else:
+            self.figura.set_facecolor(p["superficie"])
+            self.lienzo_figura.draw()
+        self._texto_boton_tema()
+
+    def _texto_boton_tema(self):
+        self.btn_tema.configure(text="Cambiar a modo claro" if self.tema == "oscuro" else "Cambiar a modo oscuro")
+
+    def _armar_barra(self):
+        """Barra de herramientas del gráfico, con los colores del tema actual (matplotlib elige íconos
+        claros u oscuros según el fondo). Al cambiar de tema se rehace: Tk no recolorea bien los
+        botones deshabilitados de una barra ya creada."""
+        vieja = getattr(self, "barra", None)
+        if vieja is not None:
+            for conexion in (vieja._id_press, vieja._id_release, vieja._id_drag):
+                self.lienzo_figura.mpl_disconnect(conexion)
+            if self.lienzo_figura.widgetlock.isowner(vieja):   # si quedó activo el zoom o el desplazamiento
+                self.lienzo_figura.widgetlock.release(vieja)
+            vieja.destroy()
+        self.barra = NavigationToolbar2Tk(self.lienzo_figura, self.grafico, pack_toolbar=False)
+        self.barra.update()
+        lienzo = self.lienzo_figura.get_tk_widget()
+        self.barra.pack(side="bottom", fill="x", **({"before": lienzo} if lienzo.winfo_manager() else {}))
 
     def _armar_ventana(self):
         cabecera = ttk.Frame(self, padding=(18, 14, 18, 6))
         cabecera.pack(fill="x")
-        ttk.Label(cabecera, text="Pupilometría · Reflejo fotomotor", style="Titulo.TLabel").pack(anchor="w")
-        ttk.Label(cabecera, text="Procesamiento de Señales e Imágenes Biomédicas · ITBA",
+        cabecera.columnconfigure(0, weight=1)
+        titulos = ttk.Frame(cabecera)
+        titulos.grid(row=0, column=0, sticky="w")
+        ttk.Label(titulos, text="Pupilometría · Reflejo fotomotor", style="Titulo.TLabel").pack(anchor="w")
+        ttk.Label(titulos, text="Procesamiento de Señales e Imágenes Biomédicas · ITBA",
                   style="Sub.TLabel").pack(anchor="w")
+        self.btn_tema = ttk.Button(cabecera, command=self.cambiar_tema)
+        self.btn_tema.grid(row=0, column=1, sticky="ne")
+        self._texto_boton_tema()
 
         cuerpo = ttk.Frame(self, padding=(18, 8, 18, 18))
         cuerpo.pack(fill="both", expand=True)
@@ -479,7 +534,7 @@ class Aplicacion(tk.Tk):
         fila.pack(fill="x", pady=(8, 0))
         self.btn_roi = ttk.Button(fila, text="Marcar ROI…", command=self.marcar_roi, state="disabled")
         self.btn_roi.pack(side="left")
-        self.lbl_roi = ttk.Label(fila, text="Primero elegí un video", style="Sub.TLabel", wraplength=250)
+        self.lbl_roi = ttk.Label(fila, text="Primero elegí un video", style="Sub.TLabel", wraplength=220)
         self.lbl_roi.pack(side="left", padx=(10, 0))
 
     def _armar_mejoramiento(self, padre):
@@ -556,14 +611,12 @@ class Aplicacion(tk.Tk):
         ttk.Label(botones, text="El video de control muestra el\ncontorno detectado en cada frame.",
                   style="Sub.TLabel", justify="left").pack(anchor="w")
 
-        grafico = ttk.Frame(pestana)
-        grafico.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
+        self.grafico = ttk.Frame(pestana)
+        self.grafico.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
         self.figura = Figure(figsize=(7, 4), dpi=100, layout="constrained", facecolor=PALETA["superficie"])
-        self.lienzo_figura = FigureCanvasTkAgg(self.figura, master=grafico)
+        self.lienzo_figura = FigureCanvasTkAgg(self.figura, master=self.grafico)
         self.lienzo_figura.get_tk_widget().configure(background=PALETA["superficie"], highlightthickness=0)
-        barra = NavigationToolbar2Tk(self.lienzo_figura, grafico, pack_toolbar=False)
-        barra.update()
-        barra.pack(side="bottom", fill="x")
+        self._armar_barra()
         self.lienzo_figura.get_tk_widget().pack(fill="both", expand=True)
 
     # ---------------- 1. Video ----------------
@@ -642,7 +695,7 @@ class Aplicacion(tk.Tk):
             self.lbl_roi.configure(text=f"x = {self.roi[0]}, y = {self.roi[1]}, {self.roi[2]} x {self.roi[3]} px, "
                                         f"marcado en el frame {self.indice} "
                                         f"(t = {ui.numero(self.indice / self.metadatos['fps'], 2, 's')})")
-            self.btn_roi.configure(text="Cambiar ROI…")
+            self.btn_roi.configure(text="Cambiar ROI o frame…")
         else:
             self._foto_roi = None
             self.img_roi.configure(image="", text="Sin ROI")
@@ -844,6 +897,7 @@ class Aplicacion(tk.Tk):
         legibles = ui.parametros_legibles(parametros) or {"Estímulo": "no se pudo detectar"}
         for nombre, valor in legibles.items():
             self.tabla.insert("", "end", values=(nombre, valor))
+        self._resultados = (curva, parametros)
         self._dibujar_curva(curva, parametros)
 
     def _dibujar_curva(self, curva, parametros):
