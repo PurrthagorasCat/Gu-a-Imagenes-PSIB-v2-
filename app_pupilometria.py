@@ -5,7 +5,8 @@ Aplicación gráfica del pipeline de pupilometría.
 
 1. Elegir el video con el explorador de archivos.
 2. Marcar la región de interés (el iris con margen) arrastrando un rectángulo.
-3. Procesar: corre el pipeline completo (el mismo de pipeline_completo.py) en segundo plano,
+3. Ver la ROI mejorada (módulo 1): es la imagen que recibe la segmentación.
+4. Procesar: corre el pipeline completo (el mismo de pipeline_completo.py) en segundo plano,
    muestra el avance y, al terminar, los parámetros fisiológicos y la curva temporal.
 """
 
@@ -35,6 +36,7 @@ from PIL import Image, ImageTk
 import pipeline_completo as pipeline
 from modulos import interfaz as ui
 from modulos import modulo0_importacion as m0
+from modulos import modulo1_mejoramiento as m1
 from modulos import modulo2_segmentacion as m2
 
 RAIZ = pipeline.RAIZ
@@ -188,14 +190,18 @@ class Aplicacion(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Pupilometría · Reflejo fotomotor")
-        self.geometry("1220x780")
-        self.minsize(1050, 680)
+        self.geometry("1220x850")
+        self.minsize(1050, 780)
         self._estilos()
 
         self.ruta = self.metadatos = self.frame0 = self.roi = None
         self.cola = queue.Queue()
         self.hilo = None
+        self.cola_mejora = queue.Queue()   # Resultados del mejoramiento calculado en segundo plano
+        self.mejorando = False
+        self._version_mejora = 0           # Para descartar resultados de un ROI anterior
         self.paso_actual = 0
+        self.total_pasos = 6
         self._resto_de_linea = ""
         self._inicio = 0.0
 
@@ -245,6 +251,7 @@ class Aplicacion(tk.Tk):
 
         self._armar_video(izquierda)
         self._armar_roi(izquierda)
+        self._armar_mejoramiento(izquierda)
         self._armar_procesamiento(izquierda)
         self._armar_registro()
         self._armar_resultados()
@@ -261,20 +268,31 @@ class Aplicacion(tk.Tk):
 
     def _armar_roi(self, padre):
         marco = ttk.LabelFrame(padre, text=" 2 · Región de interés ", padding=12)
-        marco.pack(fill="x", pady=12)
+        marco.pack(fill="x", pady=(10, 0))
         imagenes = ttk.Frame(marco)
         imagenes.pack(anchor="w")
         self.img_frame = ttk.Label(imagenes)
         self.img_frame.grid(row=0, column=0, sticky="n")
         self.img_roi = ttk.Label(imagenes, style="Sub.TLabel")
         self.img_roi.grid(row=0, column=1, sticky="n", padx=(10, 0))
-        self.lbl_roi = ttk.Label(marco, text="Primero elegí un video", style="Sub.TLabel", wraplength=380)
-        self.lbl_roi.pack(anchor="w", pady=(8, 6))
-        self.btn_roi = ttk.Button(marco, text="Marcar ROI…", command=self.marcar_roi, state="disabled")
-        self.btn_roi.pack(anchor="w")
+        fila = ttk.Frame(marco)
+        fila.pack(fill="x", pady=(8, 0))
+        self.btn_roi = ttk.Button(fila, text="Marcar ROI…", command=self.marcar_roi, state="disabled")
+        self.btn_roi.pack(side="left")
+        self.lbl_roi = ttk.Label(fila, text="Primero elegí un video", style="Sub.TLabel", wraplength=250)
+        self.lbl_roi.pack(side="left", padx=(10, 0))
+
+    def _armar_mejoramiento(self, padre):
+        marco = ttk.LabelFrame(padre, text=" 3 · Mejoramiento (Módulo 1) ", padding=12)
+        marco.pack(fill="x", pady=10)
+        self.img_mejora = ttk.Label(marco, text="Sin ROI", style="Sub.TLabel")
+        self.img_mejora.grid(row=0, column=0, sticky="nw")
+        self.lbl_mejora = ttk.Label(marco, text="Cuando haya un ROI, acá se ve la imagen que recibe la segmentación.",
+                                    style="Sub.TLabel", wraplength=190, justify="left")
+        self.lbl_mejora.grid(row=0, column=1, sticky="nw", padx=(12, 0))
 
     def _armar_procesamiento(self, padre):
-        marco = ttk.LabelFrame(padre, text=" 3 · Procesamiento ", padding=12)
+        marco = ttk.LabelFrame(padre, text=" 4 · Procesamiento ", padding=12)
         marco.pack(fill="x")
         self.btn_procesar = ttk.Button(marco, text="▶   Procesar video", style="Accion.TButton",
                                        command=self.procesar, state="disabled")
@@ -368,6 +386,7 @@ class Aplicacion(tk.Tk):
         self.btn_roi.configure(state="normal")
         self.pestanas.tab(self.pestana_resultados, state="disabled")
         self._mostrar_vista_previa()
+        self._calcular_mejora()
         self._actualizar_estado()
 
     # ---------------- 2. ROI ----------------
@@ -379,6 +398,7 @@ class Aplicacion(tk.Tk):
             self.roi = selector.resultado
             m2.guardar_roi(self.ruta.name, m2.ROI(*self.roi))   # El pipeline lo toma de roi.json
             self._mostrar_vista_previa()
+            self._calcular_mejora()
             self._actualizar_estado()
 
     def _mostrar_vista_previa(self):
@@ -387,7 +407,7 @@ class Aplicacion(tk.Tk):
             x, y, w, h = self.roi
             grosor = max(2, vista.shape[1] // 200)
             cv2.rectangle(vista, (x, y), (x + w, y + h), (235, 104, 52), grosor)
-        self._foto_frame, _ = a_foto(vista, 200, 260)
+        self._foto_frame, _ = a_foto(vista, 200, 120)
         self.img_frame.configure(image=self._foto_frame)
 
         recorte = None
@@ -395,10 +415,10 @@ class Aplicacion(tk.Tk):
             x, y, w, h = self.roi
             recorte = self.frame0[max(0, y):y + h, max(0, x):x + w]
         if recorte is not None and recorte.size:
-            self._foto_roi, _ = a_foto(recorte, 180, 260, ampliar_hasta=3.0)
+            self._foto_roi, _ = a_foto(recorte, 180, 120, ampliar_hasta=3.0)
             self.img_roi.configure(image=self._foto_roi, text="")
-            self.lbl_roi.configure(text=f"ROI: x = {self.roi[0]}, y = {self.roi[1]}, "
-                                        f"{self.roi[2]} x {self.roi[3]} px  (guardado en roi.json)")
+            self.lbl_roi.configure(text=f"x = {self.roi[0]}, y = {self.roi[1]}, "
+                                        f"{self.roi[2]} x {self.roi[3]} px (guardado en roi.json)")
             self.btn_roi.configure(text="Cambiar ROI…")
         else:
             self._foto_roi = None
@@ -406,15 +426,71 @@ class Aplicacion(tk.Tk):
             self.lbl_roi.configure(text="Marcá el iris con un rectángulo para poder procesar")
             self.btn_roi.configure(text="Marcar ROI…")
 
-    # ---------------- 3. Procesamiento ----------------
+    # ---------------- 3. Mejoramiento ----------------
+
+    def _calcular_mejora(self):
+        """Mejoramiento del primer frame (Módulo 1) en segundo plano: lo mismo que hace el paso 2 del pipeline."""
+        self._version_mejora += 1
+        self._foto_mejora = None
+        if self.roi is None:
+            self.mejorando = False
+            self.img_mejora.configure(image="", text="Sin ROI")
+            self.lbl_mejora.configure(text="Cuando haya un ROI, acá se ve la imagen que recibe la segmentación.")
+            return
+        version, ruta, roi = self._version_mejora, self.ruta, self.roi
+        arrancar = not self.mejorando
+        self.mejorando = True
+        self.img_mejora.configure(image="", text="…")
+        self.lbl_mejora.configure(text="Calculando el mejoramiento del ROI…")
+
+        def trabajo():
+            try:
+                preparacion = m2.preparar(ruta, rect=roi)          # ROI, escala y resolución
+                _, mejora, _ = m2.frame_mejorado(ruta, preparacion)
+                self.cola_mejora.put((version, mejora, None))
+            except Exception as e:
+                self.cola_mejora.put((version, None, str(e) or type(e).__name__))
+
+        threading.Thread(target=trabajo, daemon=True).start()
+        if arrancar:
+            self.after(100, self._revisar_mejora)
+
+    def _revisar_mejora(self):
+        while True:
+            try:
+                version, mejora, error = self.cola_mejora.get_nowait()
+            except queue.Empty:
+                break
+            if version == self._version_mejora:   # Los de un ROI anterior se descartan
+                self._mostrar_mejora(mejora, error)
+        if self.mejorando:
+            self.after(100, self._revisar_mejora)
+
+    def _mostrar_mejora(self, mejora, error):
+        self.mejorando = False
+        if error:
+            self.img_mejora.configure(image="", text="—")
+            self.lbl_mejora.configure(text=f"No se pudo calcular el mejoramiento: {error}")
+        else:
+            self._foto_mejora, _ = a_foto(m1.realzada_para_ver(mejora), 180, 120, ampliar_hasta=3.0)
+            self.img_mejora.configure(image=self._foto_mejora, text="")
+            f2 = "sin contraste" if mejora["umbral"] is None else mejora["umbral"]
+            k = mejora["ventana"]
+            self.lbl_mejora.configure(text=f"Grises → suavizado gaussiano {k} x {k} px → rango de interés "
+                                           f"[0, {f2}].\nEs lo que recibe la segmentación.")
+        self._actualizar_estado()
+
+    # ---------------- 4. Procesamiento ----------------
 
     def _actualizar_estado(self):
-        listo = self.ruta is not None and self.roi is not None
+        listo = self.ruta is not None and self.roi is not None and not self.mejorando
         self.btn_procesar.configure(state="normal" if listo else "disabled")
         if self.ruta is None:
             self.lbl_estado.configure(text="Elegí un video para empezar")
         elif self.roi is None:
             self.lbl_estado.configure(text="Falta marcar la región de interés")
+        elif self.mejorando:
+            self.lbl_estado.configure(text="Calculando el mejoramiento…")
         else:
             self.lbl_estado.configure(text="Todo listo para procesar")
 
@@ -498,19 +574,19 @@ class Aplicacion(tk.Tk):
         """Avance y estado a partir de los mensajes del pipeline."""
         paso = re.match(r"\s*\[(\d+)/(\d+)\]\s*(.+)", linea)
         if paso:
-            self.paso_actual = int(paso.group(1))
-            self.progreso.configure(value={1: 2, 2: 5, 3: 90, 4: 94, 5: 97}.get(self.paso_actual, 0))
+            self.paso_actual, self.total_pasos = int(paso.group(1)), int(paso.group(2))
+            self.progreso.configure(value={1: 2, 2: 4, 3: 8, 4: 92, 5: 95, 6: 98}.get(self.paso_actual, 0))
             self.lbl_estado.configure(text=f"Paso {paso.group(1)} de {paso.group(2)}: {paso.group(3)}")
             return
         frame = re.search(r"frame (\d+)/(\d+) \(\d+ %\)\s+faltan ~(\d+) s", linea)
-        if frame and self.paso_actual == 2:
+        if frame and self.paso_actual == 3:
             hechos, total, faltan = (int(g) for g in frame.groups())
-            self.progreso.configure(value=5 + 80 * hechos / max(total, 1))
-            self.lbl_estado.configure(text=f"Paso 2 de 5: segmentando el frame {hechos} de {total} "
-                                           f"(faltan ~{faltan} s)")
+            self.progreso.configure(value=8 + 78 * hechos / max(total, 1))
+            self.lbl_estado.configure(text=f"Paso 3 de {self.total_pasos}: mejorando y segmentando "
+                                           f"(frame {hechos} de {total}, faltan ~{faltan} s)")
         elif "=== Frame" in linea:
-            self.progreso.configure(value=87)
-            self.lbl_estado.configure(text="Paso 2 de 5: analizando el frame de trabajo (2.1 y 2.2)")
+            self.progreso.configure(value=88)
+            self.lbl_estado.configure(text=f"Paso 3 de {self.total_pasos}: frame de trabajo (2.1 y 2.2)")
         elif "Se abrió una ventana para marcar el ROI" in linea:
             self.lbl_estado.configure(text="Marcá el ROI en la ventana que se abrió")
 

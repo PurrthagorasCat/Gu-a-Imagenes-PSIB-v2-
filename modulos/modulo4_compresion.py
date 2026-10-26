@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt  # Gráficos
 from matplotlib.patches import Rectangle   # Recuadro de la zona ampliada
 
 from . import metricas
+from . import modulo1_mejoramiento as m1
 from . import modulo2_segmentacion as m2
 from . import modulo3_caracteristicas as m3
 
@@ -387,10 +388,10 @@ def analizar_artefactos(imagen, reconstruidas):
 
 def segmentador_modulo2(imagen_referencia, roi):
     """
-    Prepara una función que segmenta la pupila con el método del módulo 2 (snake +
-    morfología) dentro de una ROI fija. La pupila se ubica una sola vez en la imagen de
-    referencia y se usa esa misma posición siempre, así al comparar versiones comprimidas
-    lo único que cambia es la compresión.
+    Prepara una función que mejora la imagen (módulo 1) y segmenta la pupila con el método
+    del módulo 2 (snake + morfología) dentro de una ROI fija. La pupila se ubica una sola
+    vez en la imagen de referencia y se usa esa misma posición siempre, así al comparar
+    versiones comprimidas lo único que cambia es la compresión.
 
     Entrada: imagen_referencia (RGB), roi = (x, y, ancho, alto) en px de la imagen, que
              encierre el iris con un poco de margen (como la ROI que se marca en el módulo 2)
@@ -398,13 +399,15 @@ def segmentador_modulo2(imagen_referencia, roi):
     """
     region = m2.ROI(*[int(round(v)) for v in roi], origen="módulo 4")
     recorte, _ = m2.recortar(cv2.cvtColor(imagen_referencia, cv2.COLOR_RGB2BGR), region)
-    x, y, r0 = m2.estimar_pupila(cv2.cvtColor(recorte, cv2.COLOR_BGR2GRAY))
+    x, y, r0 = m2.estimar_pupila(m1.suavizar_roi(recorte)["suave_ubicacion"])
 
     def segmentar(imagen):
         # Recorte a resolución original (factor 1): achicarlo promediaría los bloques
         # de 8x8 de JPEG y se subestimaría su efecto. Es más lento que en el video
         recorte, info = m2.recortar(cv2.cvtColor(imagen, cv2.COLOR_RGB2BGR), region)
-        mascara, _ = m2.segmentar_frame(recorte, (x, y), info["esc"], r_ref=info["r_ref"], r0=r0)
+        # Mismo camino que en el video: mejoramiento (módulo 1) y segmentación (módulo 2)
+        mejora = m1.mejorar_roi(recorte, info["esc"], (x, y), info["r_ref"])
+        mascara = m2.segmentar_frame(mejora, (x, y), info["esc"], r0=r0)
         alto, ancho = imagen.shape[:2]
         if mascara is None:
             return np.zeros((alto, ancho), bool)

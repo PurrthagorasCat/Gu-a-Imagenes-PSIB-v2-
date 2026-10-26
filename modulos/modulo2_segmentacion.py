@@ -14,6 +14,11 @@ No se usa ningún algoritmo de detección automática del ojo ni modelos
 entrenados: el ROI se marca A MANO al comienzo y TODO el análisis (video,
 frame de trabajo, métodos 2.1 y 2.2, referencias) se hace dentro de ese ROI.
 
+Este módulo no mejora la imagen: segmenta la que sale del módulo 1
+(modulo1_mejoramiento: escala de grises, suavizado y rango de interés).
+En el video, cada frame pasa primero por el módulo 1 y después por la
+segmentación.
+
 Carpetas (relativas a la raíz del proyecto):
   videos/                        -> videos de entrada
   anotaciones_manuales/          -> roi.json (ROI marcados) y referencias.json
@@ -57,11 +62,16 @@ from scipy import ndimage as ndi
 from scipy.ndimage import binary_erosion as _be, binary_dilation as _bd
 from scipy.signal import medfilt
 from skimage.draw import polygon2mask
-from skimage.filters import threshold_otsu, threshold_multiotsu, gaussian, sobel
+from skimage.filters import threshold_otsu, threshold_multiotsu, sobel
 from skimage.measure import find_contours
 from skimage.morphology import disk, skeletonize
 from skimage.segmentation import active_contour, watershed
 from sklearn.cluster import KMeans
+
+try:
+    from . import modulo1_mejoramiento as m1
+except ImportError:   # ejecutado como script: python modulos/modulo2_segmentacion.py
+    import modulo1_mejoramiento as m1
 
 
 # ============================================================================
@@ -324,7 +334,7 @@ def cargar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iris=
         # escala a partir de la PUPILA (no del tamaño del ROI)
         f_rap = min(1.0, 600 / max(roi_fijo.w, roi_fijo.h))
         c0, _ = recortar(bgr_full, roi_fijo, f_rap)
-        r_iris = estimar_pupila(cv2.cvtColor(c0, cv2.COLOR_BGR2GRAY))[2] / f_rap / PUPILA_SOBRE_IRIS
+        r_iris = estimar_pupila(m1.suavizar_roi(c0)["suave_ubicacion"])[2] / f_rap / PUPILA_SOBRE_IRIS
         if r_iris <= 0:
             r_iris = roi_fijo.r_ref
     if factor is None:
@@ -332,36 +342,18 @@ def cargar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iris=
     bgr, info = recortar(bgr_full, roi_fijo, factor, r_iris)
     figura_roi(bgr_full, info, bgr, OUT_IMAGEN / f"{Path(path).stem}_00_roi.png")
     cv2.imencode(".png", bgr)[1].tofile(str(OUT_IMAGEN / f"{Path(path).stem}_roi.png"))
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    gris = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
-    return rgb, gris, lab, info
+    return bgr, info
 
 
-def localizar_pupila(gris, sigma=4, cerca_de=None, radio=None):
-    """Semilla = mínimo de la imagen muy suavizada dentro de la elipse inscripta
-    en el ROI (las esquinas suelen tener pestañas o sombra del párpado). El
-    suavizado evita que gane una pestaña o un píxel aislado.
-    En video, si se conoce la última posición de la pupila (cerca_de), se busca
-    sólo a menos de `radio` px de ella."""
-    suave = cv2.GaussianBlur(gris, (0, 0), sigma * ESC).astype(np.float32)
-    h, w = gris.shape[:2]
-    yy, xx = np.mgrid[0:h, 0:w]
-    suave[((xx - w / 2) / (w / 2)) ** 2 + ((yy - h / 2) / (h / 2)) ** 2 > 1] = 1e9
-    if cerca_de is not None and radio:
-        suave[np.hypot(xx - cerca_de[0], yy - cerca_de[1]) > radio] = 1e9
-    _, _, (x, y), _ = cv2.minMaxLoc(suave)
-    return x, y
-
-
-def estimar_pupila(gris, cerca_de=None, radio=None):
+def estimar_pupila(suave, cerca_de=None, radio=None):
     """Estimación simple (sin parámetros de escala) de la pupila en el ROI:
     punto más oscuro de la imagen suavizada (dentro de la elipse inscripta en
     el ROI), umbral a mitad de camino entre ese punto y la mediana del ROI, y
     mayor círculo inscripto en la zona oscura que contiene al punto (así no la
-    agrandan las pestañas o sombras finas pegadas). Devuelve (x, y, r)."""
-    h, w = gris.shape[:2]
-    g = cv2.GaussianBlur(gris, (0, 0), max(1.0, 0.008 * min(h, w))).astype(np.float32)
+    agrandan las pestañas o sombras finas pegadas). Devuelve (x, y, r).
+    suave: la imagen "suave_ubicacion" del módulo 1 (m1.suavizar_roi)."""
+    g = suave
+    h, w = g.shape[:2]
     yy, xx = np.mgrid[0:h, 0:w]
     elipse = ((xx - w / 2) / (w / 2)) ** 2 + ((yy - h / 2) / (h / 2)) ** 2 <= 1
     if cerca_de is not None and radio:       # en video: cerca de la última posición válida
@@ -418,8 +410,9 @@ def pegar(mask_roi, sl, shape):
 # ----------------------------------------------------------------------------
 # 2.1 Métodos de segmentación
 # ----------------------------------------------------------------------------
-def seg_otsu(gris, sl, s_roi):
-    g = cv2.GaussianBlur(gris, (impar(5, ESC),) * 2, 0)[sl]
+def seg_otsu(suave, sl, s_roi):
+    """suave: gris suavizado por el módulo 1 (mejora["suave"])."""
+    g = suave[sl]
     # (a) Otsu: umbral óptimo global sobre todo el ROI (máscara tal cual, sin
     #     post-procesar: incluye pestañas, sombras, etc. -> material para 2.2)
     t = threshold_otsu(g)
@@ -431,9 +424,10 @@ def seg_otsu(gris, sl, s_roi):
     return m, t, m_multi, t_multi
 
 
-def seg_kmeans(lab, sl, s_roi, K, w_croma=0.5):
-    """Espacio de características: L (intensidad) + a,b (croma), ponderando el croma."""
-    r = cv2.GaussianBlur(lab, (impar(5, ESC),) * 2, 0)[sl].astype(np.float32)
+def seg_kmeans(lab_suave, sl, s_roi, K, w_croma=0.5):
+    """Espacio de características: L (intensidad) + a,b (croma), ponderando el croma.
+    lab_suave: Lab suavizado por el módulo 1 (mejora["lab_suave"])."""
+    r = lab_suave[sl].astype(np.float32)
     feats = r.reshape(-1, 3).copy()
     feats[:, 1:] *= w_croma
     # en ROIs grandes (resolución original) se ajusta con una muestra de
@@ -447,17 +441,16 @@ def seg_kmeans(lab, sl, s_roi, K, w_croma=0.5):
     return m, etiquetas
 
 
-def seg_snake(gris, sl, centro, r0, t_clip, n=200, init=None):
+def seg_snake(realzada, sl, centro, r0, n=200, init=None):
     """Contorno activo inicializado como círculo que rodea a la pupila.
-    Antes se recorta la intensidad en t_clip (umbral inferior de Otsu multinivel):
+    realzada: imagen del módulo 1 con el rango de interés [0, F2] (mejora["realzada"]):
     todo lo más claro que la pupila queda "plano", así el único borde fuerte es
     la frontera pupila/iris y la snake no es atraída por el párpado o el limbo.
     alpha: elasticidad (tiende a encoger), beta: rigidez (suavidad),
     w_edge: atracción a bordes, gamma: paso temporal.
     init: contorno inicial (fila, col) dado (p.ej. la pupila del video); si no,
     un círculo de radio r0 alrededor de `centro`."""
-    img = np.minimum(gris[sl].astype(float), t_clip) / 255.0
-    img = gaussian(img, sigma=ESC, preserve_range=True)
+    img = realzada[sl]
     if init is None:
         t = np.linspace(0, 2 * np.pi, n)
         cx, cy = centro
@@ -471,11 +464,12 @@ def seg_snake(gris, sl, centro, r0, t_clip, n=200, init=None):
     return m, init, snake
 
 
-def seg_watershed(gris, sl, s_roi, m_semilla):
+def seg_watershed(suave, sl, s_roi, m_semilla):
     """Watershed controlado por marcadores sobre el gradiente.
     Marcadores: 1 = núcleo de pupila, 2 = fondo (iris/esclerótica),
-    3 = reflejos corneales (muy brillantes)."""
-    g = gaussian(gris[sl] / 255.0, sigma=ESC, preserve_range=True)
+    3 = reflejos corneales (muy brillantes).
+    suave: gris suavizado por el módulo 1 (mejora["suave"])."""
+    g = suave[sl] / 255.0
     grad = sobel(g)
     # el núcleo se toma de Otsu + apertura (corta los "puentes" hacia las
     # pestañas/pliegue del párpado) -> marcador confiable dentro de la pupila
@@ -618,8 +612,14 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
     global ESC
     nombre = Path(path).name
     stem = Path(path).stem
-    rgb, gris, lab, info_roi = cargar(path, roi_fijo, rect, nuevo_roi, factor, r_iris)
+    bgr, info_roi = cargar(path, roi_fijo, rect, nuevo_roi, factor, r_iris)
     ESC = info_roi["esc"]
+    # Módulo 1: imagen mejorada (rango de interés calculado en todo el ROI)
+    mejora = m1.mejorar_roi(bgr, ESC, color=True)
+    m1.mostrar_mejoramiento(bgr, mejora, titulo=f"{nombre}: mejoramiento (módulo 1)",
+                            destino=OUT_IMAGEN / f"{stem}_20_mejoramiento.png", mostrar=False)
+    gris = mejora["gris"]
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)   # solo para las figuras
     pupila_v = None
     if pupila_video is not None and len(pupila_video) >= 5:
         xy = a_recorte(pupila_video, info_roi)                       # (x, y) del recorte
@@ -632,7 +632,7 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
     else:
         # imagen suelta: punto de partida = estimación simple de la pupila
         # (zona oscura "gruesa" del ROI), como un disco
-        x, y, r = estimar_pupila(gris)
+        x, y, r = estimar_pupila(mejora["suave_ubicacion"])
         semilla = (int(round(x)), int(round(y)))
         yy, xx = np.mgrid[0:gris.shape[0], 0:gris.shape[1]]
         pupila_v = np.hypot(xx - x, yy - y) <= max(r, 2)
@@ -643,7 +643,7 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
     rgb_r = rgb[sl]
 
     # ---- 2.1 -------------------------------------------------------------
-    m_otsu, t_roi, m_multi, t_multi = seg_otsu(gris, sl, s_roi)
+    m_otsu, t_roi, m_multi, t_multi = seg_otsu(mejora["suave"], sl, s_roi)
     # estimación gruesa de centro/radio de la pupila para inicializar la snake:
     # centro y radio del mayor círculo inscripto en la zona oscura (máximo de la
     # transformada de distancia). No le afectan las pestañas o la sombra del
@@ -652,7 +652,7 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
         cx0, cy0, r_est = circulo_inscripto(pupila_v)
     else:
         cx0, cy0, r_est = circulo_inscripto(ndi.binary_fill_holes(m_multi))
-    km = {K: seg_kmeans(lab, sl, s_roi, K) for K in range(2, 6)}
+    km = {K: seg_kmeans(mejora["lab_suave"], sl, s_roi, K) for K in range(2, 6)}
     init_v = None
     if pupila_v is not None:
         # contorno de partida agrandado un 25 % (igual que en el seguimiento del video)
@@ -661,9 +661,10 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
         c = c[np.linspace(0, len(c) - 1, 200, endpoint=False).astype(int)]
         cen = c.mean(0)
         init_v = cen + 1.25 * (c - cen)
-    m_snake, init, snake = seg_snake(gris, sl, (cx0, cy0), 1.2 * r_est, t_multi, init=init_v)
+    m_snake, init, snake = seg_snake(mejora["realzada"], sl, (cx0, cy0), 1.2 * r_est, init=init_v)
     # marcador de pupila del Watershed: el punto de partida (pupila del video o estimación)
-    m_ws, et_ws, grad, marc = seg_watershed(gris, sl, s_roi, pupila_v if pupila_v is not None else m_multi)
+    m_ws, et_ws, grad, marc = seg_watershed(mejora["suave"], sl, s_roi,
+                                            pupila_v if pupila_v is not None else m_multi)
 
     metodos = {f"Otsu (T={t_roi:.0f})": m_otsu,
                f"Otsu multinivel (T={t_multi:.0f})": m_multi}
@@ -697,14 +698,14 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
     # Figura de diagnóstico: Otsu global, clusters, snake, watershed
     fig, ax = plt.subplots(2, 4, figsize=(13, 6.5))
     ax[0, 0].imshow(m_otsu, cmap="gray"); ax[0, 0].set_title(f"Otsu en el ROI (T={t_roi:.0f})")
-    ax[0, 1].hist(gris[sl].ravel(), 64, color="gray"); ax[0, 1].axvline(t_roi, color="r")
-    ax[0, 1].set_title("Histograma ROI + umbral Otsu")
+    ax[0, 1].hist(mejora["suave"][sl].ravel(), 64, color="gray"); ax[0, 1].axvline(t_roi, color="r")
+    ax[0, 1].set_title("Histograma ROI suavizado + umbral Otsu")
     for i, K in enumerate([3, 5]):
         ax[0, 2 + i].imshow(km[K][1], cmap="tab10"); ax[0, 2 + i].set_title(f"K-means K={K} (clusters)")
-    ax[1, 0].imshow(np.minimum(gris[sl], t_multi), cmap="gray")
+    ax[1, 0].imshow(mejora["realzada"][sl], cmap="gray")
     ax[1, 0].plot(init[:, 1], init[:, 0], "--b", lw=1, label="inicial")
     ax[1, 0].plot(snake[:, 1], snake[:, 0], "-r", lw=1.5, label="final")
-    ax[1, 0].legend(fontsize=7); ax[1, 0].set_title("Snake (imagen recortada)")
+    ax[1, 0].legend(fontsize=7); ax[1, 0].set_title("Snake (imagen realzada, módulo 1)")
     ax[1, 1].imshow(grad, cmap="magma"); ax[1, 1].set_title("Gradiente (Sobel)")
     ax[1, 2].imshow(marc, cmap="tab10", vmin=0, vmax=9); ax[1, 2].set_title("Marcadores 1=pupila 2=fondo 3=reflejo")
     ax[1, 3].imshow(et_ws, cmap="tab10", vmin=0, vmax=9); ax[1, 3].set_title("Watershed (cuencas)")
@@ -873,7 +874,7 @@ def calibrar_escala(path, roi, n=10, t=2.0):
             if not ok:
                 continue
             crop, _ = recortar(f, roi, f_rap)
-            x, y, r = estimar_pupila(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY))
+            x, y, r = estimar_pupila(m1.suavizar_roi(crop)["suave_ubicacion"])
             h, w = crop.shape[:2]
             # se descartan las estimaciones pegadas al borde del ROI (pelo, sombras)
             if r > 2 and ((x - w / 2) / (w / 2)) ** 2 + ((y - h / 2) / (h / 2)) ** 2 < 0.8:
@@ -906,35 +907,26 @@ def remuestrear(c, n=120):
     return np.c_[np.interp(s, d, cc[:, 0]), np.interp(s, d, cc[:, 1])]
 
 
-def segmentar_frame(crop, centro, esc, init=None, r_ref=None, r0=None):
-    """Snake + morfología sobre el recorte del ROI (resolución original).
+def segmentar_frame(mejora, centro, esc, init=None, r0=None):
+    """Snake + morfología sobre el recorte del ROI ya mejorado por el módulo 1.
+    mejora: salida de m1.mejorar_roi (o de m1.suavizar_roi + m1.realzar_pupila):
+            usa "suave" y el umbral F2 para la zona oscura y "realzada" para la snake.
     centro: posición (x, y) estimada de la pupila (semilla) en el recorte.
     esc:    escala de los parámetros para este ROI (ver la sección ROI MANUAL).
     init:   contorno inicial (fila, col) en coords. del recorte, o None.
-    r_ref:  radio de iris de referencia (px del recorte): el umbral se calcula
-            con el histograma de un vecindario de ±1.25·r_ref alrededor de la
-            pupila (en un ROI grande la pupila es una fracción ínfima de los
-            píxeles y el histograma de todo el ROI no la separa).
-    r0:     radio estimado de la pupila (para el círculo inicial si init=None)."""
-    gris = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    h, w = gris.shape
-    g = cv2.GaussianBlur(gris, (impar(5, esc),) * 2, 0)
+    r0:     radio estimado de la pupila (para el círculo inicial si init=None).
+    Devuelve la máscara de la pupila, o None si no se encontró."""
+    segmentar_frame.snake = None
+    g, t_multi, img = mejora["suave"], mejora["umbral"], mejora["realzada"]
+    if t_multi is None:                # sin contraste (ojo tapado, imagen saturada)
+        return None
+    h, w = g.shape
     semilla = (int(np.clip(round(centro[0]), 0, w - 1)), int(np.clip(round(centro[1]), 0, h - 1)))
-    # umbral inferior de Otsu multinivel (pupila vs resto; se adapta a la luz),
-    # calculado en el vecindario de la pupila
-    if r_ref:
-        m = int(1.25 * r_ref)
-        vec = g[max(0, semilla[1] - m):semilla[1] + m, max(0, semilla[0] - m):semilla[0] + m]
-    else:
-        vec = g
-    t_multi = threshold_multiotsu(vec, classes=3)[0]
     se = disk(px(2, esc))
     oscuro = componente_con_semilla(ndi.binary_fill_holes(g < t_multi), semilla)
-    img = gaussian(np.minimum(gris.astype(float), t_multi) / 255.0, sigma=esc, preserve_range=True)
-    segmentar_frame.snake = None
     if init is None:
         if oscuro.sum() < 10:
-            return None, t_multi
+            return None
         if r0:                         # radio estimado de la pupila (estimar_pupila)
             cx, cy, r = centro[0], centro[1], r0
         else:                          # círculo inscripto en la zona oscura
@@ -955,7 +947,7 @@ def segmentar_frame(crop, centro, esc, init=None, r_ref=None, r0=None):
     mask = componente_con_semilla(binary_opening(mask, se), semilla) if mask.any() else mask
     mask = ndi.binary_fill_holes(binary_closing(mask, se))
     segmentar_frame.snake = snake                    # subpíxel
-    return mask, t_multi
+    return mask
 
 
 def ancho_horizontal(contorno, paso=0.1):
@@ -972,12 +964,14 @@ def ancho_horizontal(contorno, paso=0.1):
     return mejor
 
 
-def calidad(mask, gris_crop, t_multi, r_ref):
+def calidad(mask, mejora, r_ref):
     """Devuelve (válido, motivo, medidas). Rangos fisiológicos con el iris
     de referencia r_ref (deducido del tamaño del ROI): la pupila mide entre
-    ~10 % y ~90 % del iris."""
+    ~10 % y ~90 % del iris. De la mejora del módulo 1 se usan el gris sin
+    filtrar (oscuridad y contraste) y el umbral F2."""
     if mask is None or mask.sum() < 10:
         return False, "sin pupila", {}
+    gris_crop, t_multi = mejora["gris"], mejora["umbral"]
     area = mask.sum()
     r_eq = np.sqrt(area / np.pi)
     # forma: elipse ajustada (relación de ejes) y solidez (área / casco convexo)
@@ -1034,15 +1028,44 @@ def ref_en_recorte(pts, info, shape):
 # ----------------------------------------------------------------------------
 # Programa principal
 # ----------------------------------------------------------------------------
-def procesar_video(path, extraer=0, max_frames=None, rect=None, nuevo_roi=False, factor=None):
-    global ESC
-    OUT_VIDEO.mkdir(exist_ok=True)
-    stem = Path(path).stem
+def preparar(path, rect=None, nuevo_roi=False, factor=None):
+    """ROI, escala (radio de iris de referencia) y resolución de procesamiento
+    del video: lo que necesitan el mejoramiento (módulo 1) y la segmentación.
+    Devuelve un dict con roi, r_iris y factor."""
     roi = inicializar(path, rect, nuevo_roi)
     r_iris = calibrar_escala(path, roi)
     factor = factor_auto(roi, r_iris) if factor is None else min(1.0, factor)
     print(f"Resolución de procesamiento: {100 * factor:.0f} % del video original "
           f"(radio de iris ≈ {r_iris * factor:.0f} px)")
+    return dict(roi=roi, r_iris=r_iris, factor=factor)
+
+
+def frame_mejorado(path, preparacion, indice=0):
+    """Recorte del ROI de un frame y su mejora (módulo 1), igual que al comienzo
+    del seguimiento: la pupila se ubica en todo el ROI y el rango de interés se
+    calcula a su alrededor. Sirve para mostrar el paso de mejoramiento.
+    Devuelve (recorte BGR, mejora, info del recorte)."""
+    with abrir_video(path) as cap:
+        if indice:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, indice)
+        ok, frame = cap.read()
+    if not ok:
+        raise RuntimeError(f"No se pudo leer el frame {indice} del video")
+    crop, info = recortar(frame, preparacion["roi"], preparacion["factor"], preparacion["r_iris"])
+    mejora = m1.suavizar_roi(crop, info["esc"])
+    x, y, _ = estimar_pupila(mejora["suave_ubicacion"])
+    return crop, m1.realzar_pupila(mejora, info["esc"], (x, y), info["r_ref"]), info
+
+
+def procesar_video(path, extraer=0, max_frames=None, rect=None, nuevo_roi=False, factor=None,
+                   preparacion=None):
+    """Seguimiento de la pupila en todo el video. preparacion: la de preparar()
+    (si no se da, se calcula acá: ROI, escala y resolución)."""
+    global ESC
+    OUT_VIDEO.mkdir(exist_ok=True)
+    stem = Path(path).stem
+    prep = preparacion or preparar(path, rect, nuevo_roi, factor)
+    roi, r_iris, factor = prep["roi"], prep["r_iris"], prep["factor"]
     contornos = {}           # contorno de la pupila de cada frame válido (coords. originales)
     tam_vis = (int(round(ALTO_OVERLAY * roi.w / roi.h)) // 2 * 2, ALTO_OVERLAY)
     refs = cargar_refs()
@@ -1072,16 +1095,20 @@ def procesar_video(path, extraer=0, max_frames=None, rect=None, nuevo_roi=False,
 
                     crop, info = recortar(frame, roi, factor, r_iris)    # SIEMPRE el mismo ROI
                     esc, r_ref = info["esc"], info["r_ref"]
-                    gris = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                    # Módulo 1, primera etapa: escala de grises y suavizado
+                    mejora = m1.suavizar_roi(crop, esc)
                     if contorno_prev is None or centro is None:
                         # inicio o después de un parpadeo: centro de la zona oscura más
                         # "gruesa" del ROI (estimar_pupila), cerca de la última posición válida
                         ESC = esc
-                        x, y, r0 = estimar_pupila(gris, cerca_de=ultimo_valido, radio=r_ref)
+                        x, y, r0 = estimar_pupila(mejora["suave_ubicacion"], cerca_de=ultimo_valido, radio=r_ref)
                         centro = (x, y)
-                    mask, t_multi = segmentar_frame(crop, centro, esc, contorno_prev, r_ref,
-                                                    r0 if contorno_prev is None else None)
-                    valido, motivo, med = calidad(mask, gris, t_multi, r_ref)
+                    # Módulo 1, segunda etapa: rango de interés alrededor de la pupila
+                    mejora = m1.realzar_pupila(mejora, esc, centro, r_ref)
+                    # Módulo 2: segmentación de la imagen mejorada
+                    mask = segmentar_frame(mejora, centro, esc, contorno_prev,
+                                           r0 if contorno_prev is None else None)
+                    valido, motivo, med = calidad(mask, mejora, r_ref)
 
                     fila = dict(frame=i, t=i / fps, valido=int(valido), motivo=motivo,
                                 roi_x0=roi.x0, roi_y0=roi.y0, roi_w=roi.w, roi_h=roi.h,
@@ -1107,7 +1134,7 @@ def procesar_video(path, extraer=0, max_frames=None, rect=None, nuevo_roi=False,
 
                     nombre = f"{stem}_frame_{i:04d}.png"
                     if nombre in refs:                         # Dice/IoU si el frame está anotado
-                        ref = ref_en_recorte(refs[nombre], info, gris.shape)
+                        ref = ref_en_recorte(refs[nombre], info, mejora["gris"].shape)
                         m_eval = mask if mask is not None else np.zeros_like(ref)
                         metricas.append(dict(frame=i, dice=dice(m_eval, ref), iou=iou(m_eval, ref)))
                     filas.append(fila)
@@ -1357,9 +1384,11 @@ def buscar_video(nombre=None):
 
 
 def ejecutar_modulo2(ruta_video=None, rect=None, usar_roi_guardado=False, factor=None,
-                     frames=("auto",), extraer=8, max_frames=None, borrar=None):
+                     frames=("auto",), extraer=8, max_frames=None, borrar=None, preparacion=None):
     """Módulo 2 completo sobre un video: ROI manual, seguimiento de la pupila en
     todo el video y análisis 2.1/2.2 sobre el/los frame(s) de trabajo.
+    preparacion: ROI, escala y resolución ya calculados con preparar() (el
+    pipeline los calcula antes, en el paso del módulo 1); si no, se calculan acá.
     Devuelve (filas, r_iris): la serie frame a frame (lista de diccionarios,
     también guardada en CSV) y el radio de iris de referencia en px del video
     original (escala usada por el módulo 3)."""
@@ -1371,7 +1400,7 @@ def ejecutar_modulo2(ruta_video=None, rect=None, usar_roi_guardado=False, factor
     OUT_IMAGEN.mkdir(parents=True, exist_ok=True)
     nuevo_roi = rect is None and PEDIR_ROI_SIEMPRE and not usar_roi_guardado
     filas, roi, fps, factor, r_iris, contornos = procesar_video(ruta, extraer, max_frames,
-                                                               rect, nuevo_roi, factor)
+                                                               rect, nuevo_roi, factor, preparacion)
     analizar_frames(ruta, filas, roi, list(frames), fps, factor, r_iris, contornos)
     return filas, r_iris
 

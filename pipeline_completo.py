@@ -5,6 +5,11 @@ Entrada : el video indicado en RUTA_VIDEO (o el que se pase al ejecutar)
 Salida  : resultados/curva_temporal.csv           (diámetro y área pupilar frame a frame)
           resultados/parametros_fisiologicos.csv  (latencia, amplitud, velocidades)
           y una copia de ambos en resultados/por_video/<nombre del video>/
+          resultados/resultados_modulo1/<video>_mejoramiento.png  (pasos del mejoramiento)
+
+Flujo: importación (módulo 0) -> ROI y mejoramiento (módulo 1) -> segmentación (módulo 2)
+       -> curva y parámetros (módulo 3). En el video, cada frame se mejora con el módulo 1
+       y la imagen mejorada es la que segmenta el módulo 2.
 
 Uso:
     python pipeline_completo.py                      # usa RUTA_VIDEO
@@ -18,6 +23,7 @@ from pathlib import Path
 
 from modulos import interfaz as ui
 from modulos import modulo0_importacion as m0
+from modulos import modulo1_mejoramiento as m1
 from modulos import modulo2_segmentacion as m2
 from modulos import modulo3_caracteristicas as m3
 
@@ -72,7 +78,7 @@ def ejecutar_pipeline(ruta_video=RUTA_VIDEO):
                    "Ventanas": "sí" if MOSTRAR_PASOS else "no",
                    "ROI": "guardado si existe" if USAR_ROI_GUARDADO else "marcar a mano",
                    "Inicio": ui.fecha_hora()})
-    total = 5
+    total = 6
 
     # 1. Importación del video ----------------------------------------------------------
     with ui.paso(1, total, "Importación del video (Módulo 0)"):
@@ -88,31 +94,46 @@ def ejecutar_pipeline(ruta_video=RUTA_VIDEO):
             m0.mostrar_frames_muestra(video, metadatos)
         video.release()
 
-    # 2. Segmentación frame a frame -------------------------------------------------------
-    with ui.paso(2, total, "Segmentación de la pupila frame a frame (Módulo 2)"):
-        filas, r_iris = m2.ejecutar_modulo2(ruta, usar_roi_guardado=USAR_ROI_GUARDADO)
+    # 2. ROI y mejoramiento -------------------------------------------------------------
+    figura_mejora = carpeta / "resultados_modulo1" / f"{ruta.stem}_mejoramiento.png"
+    with ui.paso(2, total, "ROI y mejoramiento (Módulo 1)"):
+        preparacion = m2.preparar(ruta, nuevo_roi=m2.PEDIR_ROI_SIEMPRE and not USAR_ROI_GUARDADO)
+        recorte, mejora, _ = m2.frame_mejorado(ruta, preparacion)   # primer frame, para mostrar
+        f2 = "sin contraste en el primer frame" if mejora["umbral"] is None else mejora["umbral"]
+        ui.tabla({"ROI procesado": f"{recorte.shape[1]} x {recorte.shape[0]} px, en escala de grises",
+                  "Suavizado": f"gaussiano de {mejora['ventana']} x {mejora['ventana']} px",
+                  "Rango de interés": f"[0, {f2}] (F2 por Otsu multinivel, se recalcula en cada frame)"})
+        if MOSTRAR_PASOS:
+            ui.info("Se abre la figura del mejoramiento (cerrarla para continuar).")
+        m1.mostrar_mejoramiento(recorte, mejora, titulo=f"{ruta.name}: mejoramiento del ROI (primer frame)",
+                                destino=figura_mejora, mostrar=MOSTRAR_PASOS)
 
-    # 3. Curva temporal y artefactos ------------------------------------------------------
-    with ui.paso(3, total, "Curva temporal y artefactos (Módulo 3)"):
+    # 3. Segmentación frame a frame -------------------------------------------------------
+    with ui.paso(3, total, "Segmentación de la pupila frame a frame (Módulo 2)"):
+        ui.info("Cada frame: mejoramiento (Módulo 1) y segmentación de la imagen mejorada (Módulo 2)")
+        filas, r_iris = m2.ejecutar_modulo2(ruta, preparacion=preparacion)
+
+    # 4. Curva temporal y artefactos ------------------------------------------------------
+    with ui.paso(4, total, "Curva temporal y artefactos (Módulo 3)"):
         curva = m3.curva_desde_modulo2(filas, ruta, r_iris)
         curva = m3.limpiar_curva(curva)
 
-    # 4. Estímulo y parámetros fisiológicos -----------------------------------------------
-    with ui.paso(4, total, "Estímulo y parámetros fisiológicos (Módulo 3)"):
+    # 5. Estímulo y parámetros fisiológicos -----------------------------------------------
+    with ui.paso(5, total, "Estímulo y parámetros fisiológicos (Módulo 3)"):
         t_estimulo, tipo = m3.detectar_estimulo(curva)
         parametros = m3.parametros_fisiologicos(curva, t_estimulo, tipo, mm_por_px=MM_POR_PX)
         if MOSTRAR_PASOS:
             ui.info("Se abre el gráfico de la curva temporal (cerrarlo para continuar).")
             m3.mostrar_curva(curva, parametros=parametros, titulo=ruta.name)
 
-    # 5. Exportación ----------------------------------------------------------------------
-    with ui.paso(5, total, "Exportación de resultados"):
+    # 6. Exportación ----------------------------------------------------------------------
+    with ui.paso(6, total, "Exportación de resultados"):
         m3.guardar_resultados(curva, parametros, carpeta)          # nombres fijos (última corrida)
         m3.guardar_resultados(curva, parametros, carpeta_video)    # copia por video
 
     ui.resumen_parametros(parametros)
     ui.archivos([carpeta / "curva_temporal.csv", carpeta / "parametros_fisiologicos.csv",
-                 carpeta_video, m2.CARPETA_RESULTADOS], raiz=RAIZ)
+                 carpeta_video, figura_mejora, m2.CARPETA_RESULTADOS], raiz=RAIZ)
     ui.cierre(time.perf_counter() - inicio)
     return curva, parametros
 

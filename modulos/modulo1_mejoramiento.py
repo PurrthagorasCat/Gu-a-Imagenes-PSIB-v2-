@@ -1,13 +1,20 @@
 """
 Módulo 1 — Fundamentos, espacios de color y mejoramiento digital.
+
+1.1 a 1.3 son las funciones de los notebooks de análisis. La sección "Mejoramiento del ROI
+para la segmentación" es la que usa el pipeline: de ahí sale la imagen que segmenta el módulo 2.
 """
  
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgb
+from matplotlib.patches import Rectangle
 from matplotlib.ticker import FuncFormatter
+from skimage.filters import gaussian, threshold_multiotsu
  
 # ------------------------------------------------------------
 # 1.1 Dimensiones, resolución espacial, cuantización y color
@@ -329,7 +336,84 @@ def respuesta_kernel(kernel, n=512):
 def sigma_gaussiano_opencv(k):
     """σ que usa OpenCV para un kernel gaussiano de K x K cuando se le pasa σ = 0."""
     return 0.3 * ((k - 1) * 0.5 - 1) + 0.8
- 
+
+
+# ------------------------------------------------------------
+# Mejoramiento del ROI para la segmentación (pipeline)
+# ------------------------------------------------------------
+# Es la imagen que recibe el módulo 2 en cada frame. Se trabaja sobre el recorte del ROI en
+# BGR (como lo lee OpenCV). `esc` es la escala del ROI (radio del iris / 32 px): los tamaños
+# de los filtros se adaptan a la resolución del video.
+
+def ventana_suavizado(esc, base=5):
+    """Lado impar del kernel gaussiano: `base` px para un iris de 32 px de radio, proporcional a esc."""
+    n = max(3, int(round(base * esc)))
+    return n if n % 2 else n + 1
+
+
+def suavizar_roi(recorte_bgr, esc=None, color=False):
+    """
+    Primera etapa del mejoramiento: escala de grises y suavizado gaussiano.
+
+    Entrada: recorte del ROI (BGR), esc (None si todavía no se conoce la escala),
+             color (True: también Lab suavizado, para K-means)
+    Salida: dict con gris y suave_ubicacion; si se da esc, también ventana y suave (y lab_suave)
+    """
+    gris = cv2.cvtColor(recorte_bgr, cv2.COLOR_BGR2GRAY)
+    alto, ancho = gris.shape
+    mejora = {
+        "gris": gris,
+        # Para ubicar la pupila: σ proporcional al ROI, porque se usa antes de conocer la escala
+        "suave_ubicacion": cv2.GaussianBlur(gris, (0, 0), max(1.0, 0.008 * min(alto, ancho))).astype(np.float32),
+    }
+    if esc is not None:
+        k = ventana_suavizado(esc)
+        mejora["ventana"] = k
+        mejora["suave"] = cv2.GaussianBlur(gris, (k, k), 0)   # Menos ruido antes de umbralizar
+        if color:
+            mejora["lab_suave"] = cv2.GaussianBlur(cv2.cvtColor(recorte_bgr, cv2.COLOR_BGR2LAB), (k, k), 0)
+    return mejora
+
+
+def realzar_pupila(mejora, esc, centro=None, radio_iris=None):
+    """
+    Segunda etapa: rango de interés [0, F2], como el escalado de 1.2 pero sin estirar. Lo más
+    claro que F2 queda en F2, así el único borde fuerte que queda es el de la pupila.
+
+    F2 es el umbral inferior de Otsu multinivel (pupila / iris oscuro / iris claro y piel),
+    calculado en un vecindario de ±1,25 radios de iris alrededor de `centro`: en un ROI grande
+    la pupila es una fracción chica de los píxeles y el histograma completo no la separa. Se
+    recalcula en cada frame, así se adapta al cambio de luz del estímulo. Sin `centro` se
+    usa todo el ROI.
+
+    Entrada: mejora (de suavizar_roi, con esc), esc, centro (x, y) de la pupila en el recorte,
+             radio_iris (px del recorte)
+    Salida: copia de mejora con umbral (F2; None si no hay contraste), vecindario (x0, y0, x1, y1)
+            y realzada (float de 0 a 1, suavizada con σ = esc)
+    """
+    suave = mejora["suave"]
+    alto, ancho = suave.shape
+    x0, y0, x1, y1 = 0, 0, ancho, alto
+    if centro is not None and radio_iris:
+        x = int(np.clip(round(centro[0]), 0, ancho - 1))
+        y = int(np.clip(round(centro[1]), 0, alto - 1))
+        m = int(1.25 * radio_iris)
+        x0, y0, x1, y1 = max(0, x - m), max(0, y - m), x + m, y + m
+    try:
+        umbral = int(threshold_multiotsu(suave[y0:y1, x0:x1], classes=3)[0])
+    except ValueError:
+        umbral = None   # Vecindario casi uniforme (ojo tapado, imagen saturada): no hay pupila
+    gris = mejora["gris"].astype(float)
+    recortada = gris if umbral is None else np.minimum(gris, umbral)
+    # El suavizado ensancha el borde, así la snake lo encuentra desde más lejos
+    realzada = gaussian(recortada / 255.0, sigma=esc, preserve_range=True)
+    return dict(mejora, umbral=umbral, vecindario=(x0, y0, min(x1, ancho), min(y1, alto)), realzada=realzada)
+
+
+def mejorar_roi(recorte_bgr, esc, centro=None, radio_iris=None, color=False):
+    """Las dos etapas juntas (grises, suavizado y rango de interés), para una imagen suelta."""
+    return realzar_pupila(suavizar_roi(recorte_bgr, esc, color), esc, centro, radio_iris)
+
 
  
  
@@ -477,3 +561,65 @@ def graficar_curvas(curvas, titulo, xlabel, ylabel, log_y=False, referencia=None
     _ejes_recesivos(eje)
     eje.grid(axis="x", color=GRIS_GRILLA, linewidth=0.8)
     plt.show()
+
+
+def realzada_para_ver(mejora):
+    """Imagen realzada estirada a 0–255 entre su mínimo y su máximo (como escalar_rango), solo para mostrarla."""
+    r = mejora["realzada"]
+    bajo, alto = r.min(), r.max()
+    return np.clip(np.round((r - bajo) / max(alto - bajo, 1e-12) * 255), 0, 255).astype(np.uint8)
+
+
+def mostrar_mejoramiento(recorte_bgr, mejora, titulo=None, destino=None, mostrar=True):
+    """
+    Pasos del mejoramiento del ROI: original, grises, suavizado, rango de interés y el
+    histograma del vecindario donde se calcula F2 (recuadro punteado).
+
+    Entrada: recorte del ROI (BGR), mejora (de mejorar_roi), titulo, destino (ruta para guardar
+             la figura, opcional), mostrar (False: no abre la ventana)
+    Salida: nada
+    """
+    k, umbral = mejora["ventana"], mejora["umbral"]
+    x0, y0, x1, y1 = mejora["vecindario"]
+    relacion = recorte_bgr.shape[1] / recorte_bgr.shape[0]
+    alto = 2.8
+    fig = plt.figure(figsize=(3 * alto * relacion + 0.6, 2 * alto + 1.2), layout="constrained")
+    arriba, abajo = fig.subfigures(2, 1)   # Filas independientes: el histograma no corre las imágenes
+    ejes = dict(zip(["roi", "gris", "suave"], arriba.subplots(1, 3)))
+    ejes.update(zip(["realzada", "hist"], abajo.subplots(1, 2, width_ratios=[1, 2])))
+    paneles = [("roi", cv2.cvtColor(recorte_bgr, cv2.COLOR_BGR2RGB), "ROI"),
+               ("gris", mejora["gris"], "1. Escala de grises"),
+               ("suave", mejora["suave"], f"2. Suavizado gaussiano {k} x {k} px"),
+               ("realzada", realzada_para_ver(mejora),
+                "3. Rango de interés: sin contraste" if umbral is None else f"3. Rango de interés [0, {umbral}]")]
+    for clave, img, texto in paneles:
+        ejes[clave].imshow(img, cmap=None if img.ndim == 3 else "gray", vmin=0, vmax=255)
+        ejes[clave].set_title(texto)
+        ejes[clave].axis("off")
+    ejes["suave"].add_patch(Rectangle((x0 - 0.5, y0 - 0.5), x1 - x0, y1 - y0, fill=False,
+                                      edgecolor=COLORES[1], linestyle="--", linewidth=1.5))
+
+    # Histograma del vecindario: F2 separa la pupila (niveles bajos) del resto
+    eje_h = ejes["hist"]
+    h = histograma(mejora["suave"][y0:y1, x0:x1])
+    eje_h.bar(np.arange(256), h, width=1.0, color=COLORES[0], edgecolor="none")
+    if umbral is not None:
+        eje_h.axvline(umbral, color=COLORES[1], linewidth=1.5)
+        eje_h.text(umbral + 4, h.max() * 0.95, f"F2 = {umbral} (Otsu multinivel)", color=COLORES[1],
+                   va="top", fontsize=9)
+    eje_h.set_xlim(-2, 257)
+    eje_h.yaxis.set_major_formatter(FuncFormatter(lambda v, _: formato_miles(int(v))))
+    eje_h.set_title("Histograma del vecindario de la pupila (suavizado)", fontsize=10, color=GRIS_TEXTO)
+    eje_h.set_xlabel("Nivel de gris", color=GRIS_TEXTO)
+    eje_h.set_ylabel("Píxeles", color=GRIS_TEXTO)
+    _ejes_recesivos(eje_h)
+
+    if titulo:
+        fig.suptitle(titulo, fontweight="bold")
+    if destino:
+        Path(destino).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(destino, dpi=130)
+    if mostrar:
+        plt.show()
+    else:
+        plt.close(fig)
