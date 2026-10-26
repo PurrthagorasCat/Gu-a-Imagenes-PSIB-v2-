@@ -190,8 +190,8 @@ class Aplicacion(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Pupilometría · Reflejo fotomotor")
-        self.geometry("1220x850")
-        self.minsize(1050, 780)
+        self.geometry("1220x870")
+        self.minsize(1050, 800)
         self._estilos()
 
         self.ruta = self.metadatos = self.frame0 = self.roi = None
@@ -225,6 +225,7 @@ class Aplicacion(tk.Tk):
         estilo.configure("Titulo.TLabel", font=(familia, 17, "bold"))
         estilo.configure("Sub.TLabel", foreground=GRIS)
         estilo.configure("Dato.TLabel", font=(familia, 10, "bold"))
+        estilo.configure("Flecha.TLabel", font=(familia, 16), foreground=GRIS)
         estilo.configure("Accion.TButton", font=(familia, 11, "bold"), padding=(10, 8))
         estilo.configure("TLabelframe.Label", font=(familia, 10, "bold"))
         estilo.configure("Treeview", rowheight=26)
@@ -285,11 +286,20 @@ class Aplicacion(tk.Tk):
     def _armar_mejoramiento(self, padre):
         marco = ttk.LabelFrame(padre, text=" 3 · Mejoramiento (Módulo 1) ", padding=12)
         marco.pack(fill="x", pady=10)
-        self.img_mejora = ttk.Label(marco, text="Sin ROI", style="Sub.TLabel")
-        self.img_mejora.grid(row=0, column=0, sticky="nw")
-        self.lbl_mejora = ttk.Label(marco, text="Cuando haya un ROI, acá se ve la imagen que recibe la segmentación.",
-                                    style="Sub.TLabel", wraplength=190, justify="left")
-        self.lbl_mejora.grid(row=0, column=1, sticky="nw", padx=(12, 0))
+        # Mensaje mientras no hay imágenes (sin ROI, calculando o error)
+        self.lbl_mejora = ttk.Label(marco, style="Sub.TLabel", wraplength=380, justify="left")
+        # Los dos pasos uno al lado del otro: suavizado -> rango de interés
+        self.pasos_mejora = ttk.Frame(marco)
+        self.img_suave = ttk.Label(self.pasos_mejora)
+        self.img_suave.grid(row=0, column=0)
+        ttk.Label(self.pasos_mejora, text="→", style="Flecha.TLabel").grid(row=0, column=1, padx=8)
+        self.img_rango = ttk.Label(self.pasos_mejora)
+        self.img_rango.grid(row=0, column=2)
+        self.lbl_suave = ttk.Label(self.pasos_mejora, style="Sub.TLabel", justify="center")
+        self.lbl_suave.grid(row=1, column=0, pady=(4, 0))
+        self.lbl_rango = ttk.Label(self.pasos_mejora, style="Sub.TLabel", justify="center")
+        self.lbl_rango.grid(row=1, column=2, pady=(4, 0))
+        self._mensaje_mejora("Cuando haya un ROI, acá se ven los pasos del mejoramiento.")
 
     def _armar_procesamiento(self, padre):
         marco = ttk.LabelFrame(padre, text=" 4 · Procesamiento ", padding=12)
@@ -407,7 +417,7 @@ class Aplicacion(tk.Tk):
             x, y, w, h = self.roi
             grosor = max(2, vista.shape[1] // 200)
             cv2.rectangle(vista, (x, y), (x + w, y + h), (235, 104, 52), grosor)
-        self._foto_frame, _ = a_foto(vista, 200, 120)
+        self._foto_frame, _ = a_foto(vista, 200, 110)
         self.img_frame.configure(image=self._foto_frame)
 
         recorte = None
@@ -415,7 +425,7 @@ class Aplicacion(tk.Tk):
             x, y, w, h = self.roi
             recorte = self.frame0[max(0, y):y + h, max(0, x):x + w]
         if recorte is not None and recorte.size:
-            self._foto_roi, _ = a_foto(recorte, 180, 120, ampliar_hasta=3.0)
+            self._foto_roi, _ = a_foto(recorte, 180, 110, ampliar_hasta=3.0)
             self.img_roi.configure(image=self._foto_roi, text="")
             self.lbl_roi.configure(text=f"x = {self.roi[0]}, y = {self.roi[1]}, "
                                         f"{self.roi[2]} x {self.roi[3]} px (guardado en roi.json)")
@@ -431,17 +441,14 @@ class Aplicacion(tk.Tk):
     def _calcular_mejora(self):
         """Mejoramiento del primer frame (Módulo 1) en segundo plano: lo mismo que hace el paso 2 del pipeline."""
         self._version_mejora += 1
-        self._foto_mejora = None
         if self.roi is None:
             self.mejorando = False
-            self.img_mejora.configure(image="", text="Sin ROI")
-            self.lbl_mejora.configure(text="Cuando haya un ROI, acá se ve la imagen que recibe la segmentación.")
+            self._mensaje_mejora("Cuando haya un ROI, acá se ven los pasos del mejoramiento.")
             return
         version, ruta, roi = self._version_mejora, self.ruta, self.roi
         arrancar = not self.mejorando
         self.mejorando = True
-        self.img_mejora.configure(image="", text="…")
-        self.lbl_mejora.configure(text="Calculando el mejoramiento del ROI…")
+        self._mensaje_mejora("Calculando el mejoramiento del ROI…")
 
         def trabajo():
             try:
@@ -466,18 +473,29 @@ class Aplicacion(tk.Tk):
         if self.mejorando:
             self.after(100, self._revisar_mejora)
 
+    def _mensaje_mejora(self, texto):
+        """Muestra un mensaje en lugar de las imágenes del mejoramiento."""
+        self._fotos_mejora = None
+        self.pasos_mejora.pack_forget()
+        self.lbl_mejora.configure(text=texto)
+        self.lbl_mejora.pack(anchor="w")
+
     def _mostrar_mejora(self, mejora, error):
         self.mejorando = False
         if error:
-            self.img_mejora.configure(image="", text="—")
-            self.lbl_mejora.configure(text=f"No se pudo calcular el mejoramiento: {error}")
+            self._mensaje_mejora(f"No se pudo calcular el mejoramiento: {error}")
         else:
-            self._foto_mejora, _ = a_foto(m1.realzada_para_ver(mejora), 180, 120, ampliar_hasta=3.0)
-            self.img_mejora.configure(image=self._foto_mejora, text="")
-            f2 = "sin contraste" if mejora["umbral"] is None else mejora["umbral"]
+            suave, _ = a_foto(mejora["suave"], 170, 100, ampliar_hasta=3.0)
+            rango, _ = a_foto(m1.realzada_para_ver(mejora), 170, 100, ampliar_hasta=3.0)
+            self._fotos_mejora = (suave, rango)   # Tkinter necesita guardar una referencia a cada imagen
+            self.img_suave.configure(image=suave)
+            self.img_rango.configure(image=rango)
             k = mejora["ventana"]
-            self.lbl_mejora.configure(text=f"Grises → suavizado gaussiano {k} x {k} px → rango de interés "
-                                           f"[0, {f2}].\nEs lo que recibe la segmentación.")
+            f2 = "sin contraste" if mejora["umbral"] is None else mejora["umbral"]
+            self.lbl_suave.configure(text=f"1. Suavizado gaussiano\n{k} x {k} px (en grises)")
+            self.lbl_rango.configure(text=f"2. Rango de interés [0, {f2}]\nentra a la segmentación")
+            self.lbl_mejora.pack_forget()
+            self.pasos_mejora.pack(anchor="w")
         self._actualizar_estado()
 
     # ---------------- 4. Procesamiento ----------------
