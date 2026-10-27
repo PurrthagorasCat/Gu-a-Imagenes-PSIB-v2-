@@ -1,5 +1,5 @@
 imagen,etapa,metodo,dice,iou
-registro_A1_frame_2935.png,2.1,Otsu (T=95),nan,nan
+registro_A1_frame_2935.png,2.1,Otsu (T=94),nan,nan
 registro_A1_frame_2935.png,2.1,Otsu multinivel (T=63),nan,nan
 registro_A1_frame_2935.png,2.1,K-means K=2,nan,nan
 registro_A1_frame_2935.png,2.1,K-means K=3,nan,nan
