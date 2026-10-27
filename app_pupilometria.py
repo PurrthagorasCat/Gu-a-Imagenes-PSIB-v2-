@@ -10,6 +10,9 @@ Aplicación gráfica del pipeline de pupilometría.
 3. Ver la ROI mejorada (módulo 1): es la imagen que recibe la segmentación.
 4. Procesar: corre el pipeline completo (el mismo de pipeline_completo.py) en segundo plano,
    muestra el avance y, al terminar, los parámetros fisiológicos y la curva temporal.
+5. Recorrer la curva: al pasar el cursor por el gráfico, al costado se ve el frame de ese
+   instante en el video de control (contorno verde: válido; rojo: rechazado). Las flechas
+   ← y → avanzan de a un frame.
 
 Los colores siguen el tema claro u oscuro del sistema; el botón de arriba a la derecha cambia de
 uno a otro, y TEMA (más abajo) permite fijar con cuál arranca.
@@ -23,6 +26,7 @@ import sys
 import threading
 import time
 import traceback
+from contextlib import ExitStack
 from pathlib import Path
 
 import tkinter as tk
@@ -339,7 +343,8 @@ class Aplicacion(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Pupilometría · Reflejo fotomotor")
-        self.geometry("1220x870")
+        # Más ancha que antes para que entren el gráfico y el video uno al lado del otro
+        self.geometry(f"{min(1440, self.winfo_screenwidth() - 40)}x870")
         self.minsize(1050, 800)
         self._estilos()
 
@@ -353,6 +358,15 @@ class Aplicacion(tk.Tk):
         self.paso_actual = 0
         self.total_pasos = 6
         self._resultados = None            # (curva, parámetros) del último procesamiento, para redibujar
+        self._video_control = None         # Video de control abierto, para recorrer la curva
+        self._pila_video = ExitStack()     # Lo cierra (y borra la copia temporal, si la hubo)
+        self._siguiente_frame = -1         # Frame que devuelve el próximo read() sin posicionarse
+        self._recorte_original = None      # Si no hay video de control: ROI a recortar del original
+        self._ejes_curva = ()
+        self._cursores = []
+        self._i_cursor = None              # Fila de la curva que se está mostrando
+        self._t_pedido = None
+        self._cursor_programado = False
         self._resto_de_linea = ""
         self._inicio = 0.0
 
@@ -593,7 +607,7 @@ class Aplicacion(tk.Tk):
         pestana.rowconfigure(1, weight=1)
 
         arriba = ttk.Frame(pestana)
-        arriba.grid(row=0, column=0, sticky="ew")
+        arriba.grid(row=0, column=0, columnspan=2, sticky="ew")
         arriba.columnconfigure(0, weight=1)
         self.tabla = ttk.Treeview(arriba, columns=("parametro", "valor"), show="headings", height=10)
         self.tabla.heading("parametro", text="Parámetro", anchor="w")
@@ -618,6 +632,20 @@ class Aplicacion(tk.Tk):
         self.lienzo_figura.get_tk_widget().configure(background=PALETA["superficie"], highlightthickness=0)
         self._armar_barra()
         self.lienzo_figura.get_tk_widget().pack(fill="both", expand=True)
+        # Recorrer la curva con el cursor: se conecta una sola vez, porque el lienzo no cambia
+        self.lienzo_figura.mpl_connect("motion_notify_event", self._mover_cursor)
+        self.bind("<Left>", lambda _: self._paso_cursor(-1))
+        self.bind("<Right>", lambda _: self._paso_cursor(+1))
+
+        lado = ttk.Frame(pestana, width=330)
+        lado.grid(row=1, column=1, sticky="n", padx=(14, 0), pady=(12, 0))
+        ttk.Label(lado, text="Video en el instante del cursor", style="Dato.TLabel").pack(anchor="w")
+        self.img_instante = ttk.Label(lado, text="Pasá el cursor por el gráfico", style="Sub.TLabel")
+        self.img_instante.pack(anchor="w", pady=(8, 6))
+        self.lbl_instante = ttk.Label(lado, text="", wraplength=320, justify="left")
+        self.lbl_instante.pack(anchor="w")
+        self.lbl_fuente = ttk.Label(lado, text="", style="Sub.TLabel", wraplength=320, justify="left")
+        self.lbl_fuente.pack(anchor="w", pady=(10, 0))
 
     # ---------------- 1. Video ----------------
 
@@ -784,6 +812,9 @@ class Aplicacion(tk.Tk):
             boton.configure(state=estado)
 
     def procesar(self):
+        # El módulo 2 borra sus resultados anteriores al empezar: el video de control tiene que
+        # estar cerrado (en Windows un archivo abierto no se puede borrar)
+        self._cerrar_video_control()
         self._bloquear(True)
         self.texto.configure(state="normal")
         self.texto.delete("1.0", "end")
@@ -898,7 +929,11 @@ class Aplicacion(tk.Tk):
         for nombre, valor in legibles.items():
             self.tabla.insert("", "end", values=(nombre, valor))
         self._resultados = (curva, parametros)
+        self._i_cursor = None
+        self._abrir_video_control()
         self._dibujar_curva(curva, parametros)
+        self.img_instante.configure(image="", text="Pasá el cursor por el gráfico")
+        self.lbl_instante.configure(text="")
 
     def _dibujar_curva(self, curva, parametros):
         p = PALETA
@@ -928,6 +963,14 @@ class Aplicacion(tk.Tk):
                 for eje in (eje_d, eje_b):
                     eje.axvline(valor, color=color, linestyle=estilo, linewidth=1.3,
                                 label=nombre if eje is eje_d else None)
+        # Línea del cursor, oculta hasta que se pasa el mouse por el gráfico
+        self._ejes_curva = (eje_d, eje_b)
+        self._cursores = [eje.axvline(t.iloc[0], color=p["texto"], linewidth=1, alpha=0.6, visible=False)
+                          for eje in self._ejes_curva]
+        if self._i_cursor is not None:   # Al redibujar (cambio de tema) se conserva la posición
+            for linea in self._cursores:
+                linea.set_xdata([t.iloc[self._i_cursor]] * 2)
+                linea.set_visible(True)
         eje_d.legend(loc="best", fontsize=8, frameon=False, labelcolor=p["texto"])
         eje_d.set_title(f"Curva temporal · {self.ruta.name}", fontweight="bold", fontsize=11, color=p["texto"])
         for eje in (eje_d, eje_b):
@@ -939,6 +982,110 @@ class Aplicacion(tk.Tk):
             eje.grid(color=p["grilla"], linewidth=0.8)
             eje.tick_params(colors=p["texto2"], labelsize=9)
         self.lienzo_figura.draw()
+
+    # ---------------- Recorrer la curva con el video ----------------
+
+    def _abrir_video_control(self):
+        """Abre el video de control del módulo 2 (el ROI con el contorno de cada frame). Tiene un
+        frame por cada frame del original, así que se lo recorre por número de frame. Si no está,
+        se usa el video original recortado al ROI (más lento: es 4K y hay que decodificarlo)."""
+        self._cerrar_video_control()
+        control = m2.OUT_VIDEO / f"{self.ruta.stem}_overlay.mp4"
+        fuente = control if control.exists() else self.ruta
+        try:
+            # m2.abrir_video resuelve las rutas con acentos en Windows; la pila lo mantiene abierto
+            self._video_control = self._pila_video.enter_context(m2.abrir_video(fuente))
+        except Exception as e:
+            self._video_control = None
+            self.lbl_fuente.configure(text=f"No se pudo abrir el video para recorrer la curva: {e}")
+            return
+        self._recorte_original = None if fuente == control else self.roi
+        self.lbl_fuente.configure(
+            text="Video de control: contorno verde si el frame es válido, rojo si se rechazó. "
+                 "Flechas ← →: frame anterior / siguiente. Con la lupa de la barra se puede ampliar "
+                 "un tramo del gráfico." if fuente == control else
+                 "No está el video de control: se muestra el video original recortado al ROI "
+                 "(sin contorno y más lento).")
+
+    def _cerrar_video_control(self):
+        self._pila_video.close()   # Libera el video y borra la copia temporal, si la hubo
+        self._video_control = None
+        self._siguiente_frame = -1
+
+    def _mover_cursor(self, evento):
+        """Mouse sobre el gráfico: se guarda el instante y se actualiza como mucho cada 30 ms,
+        para que el video no se atrase si el mouse se mueve rápido."""
+        if self._resultados is None or evento.inaxes not in self._ejes_curva or evento.xdata is None:
+            return
+        self._t_pedido = evento.xdata
+        if not self._cursor_programado:
+            self._cursor_programado = True
+            self.after(30, self._actualizar_cursor)
+
+    def _actualizar_cursor(self):
+        self._cursor_programado = False
+        t = self._resultados[0]["t_s"].to_numpy()
+        i = int(np.clip(np.searchsorted(t, self._t_pedido), 1, len(t) - 1))
+        i = i - 1 if self._t_pedido - t[i - 1] < t[i] - self._t_pedido else i   # El más cercano
+        self._mostrar_instante(i)
+
+    def _paso_cursor(self, paso):
+        """Flechas: frame anterior o siguiente (solo en la pestaña de resultados)."""
+        if self._resultados is None or self._i_cursor is None:
+            return
+        if self.pestanas.select() != str(self.pestana_resultados):
+            return
+        self._mostrar_instante(int(np.clip(self._i_cursor + paso, 0, len(self._resultados[0]) - 1)))
+
+    def _mostrar_instante(self, i):
+        """Mueve la línea del cursor a la fila i de la curva y muestra ese frame del video."""
+        if i == self._i_cursor:
+            return
+        self._i_cursor = i
+        fila = self._resultados[0].iloc[i]
+        for linea in self._cursores:
+            linea.set_xdata([fila["t_s"]] * 2)
+            linea.set_visible(True)
+        self.lienzo_figura.draw_idle()
+
+        frame = self._leer_frame(int(fila["frame"]))
+        if frame is None:
+            self._foto_instante = None
+            self.img_instante.configure(image="", text="No se pudo leer este frame del video")
+        else:
+            self._foto_instante, _ = a_foto(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), 320, 260)
+            self.img_instante.configure(image=self._foto_instante, text="")
+
+        motivo = str(fila.get("motivo_invalido", "") or "")
+        if motivo:
+            estado = f"Rechazado por el módulo 2: {motivo}. El diámetro se interpoló."
+        elif bool(fila.get("artefacto", False)):
+            estado = "Marcado como artefacto por el módulo 3 (atípico, movimiento o borde de un parpadeo). " \
+                     "El diámetro se interpoló."
+        else:
+            estado = "Frame válido."
+        medido = "—" if not np.isfinite(fila["diametro"]) else ui.numero(fila["diametro"], 1, "px")
+        self.lbl_instante.configure(
+            text=f"t = {ui.numero(fila['t_s'], 3, 's')}  ·  frame {int(fila['frame'])}\n"
+                 f"Diámetro medido: {medido}  ·  suavizado: {ui.numero(fila['diametro_suave'], 1, 'px')}\n"
+                 f"{estado}")
+
+    def _leer_frame(self, k):
+        """Frame k (BGR) del video que se está recorriendo. Si es el siguiente al último leído se
+        lee de corrido; si no, hay que posicionarse, que es más lento."""
+        video = self._video_control
+        if video is None:
+            return None
+        if k != self._siguiente_frame:
+            video.set(cv2.CAP_PROP_POS_FRAMES, k)
+        ok, frame = video.read()
+        self._siguiente_frame = k + 1 if ok else -1
+        if not ok:
+            return None
+        if self._recorte_original:   # Video original: se muestra solo el ROI
+            x, y, w, h = self._recorte_original
+            frame = frame[max(0, y):y + h, max(0, x):x + w]
+        return frame
 
     def abrir_resultados(self):
         carpeta = RAIZ / pipeline.CARPETA_RESULTADOS / "por_video" / self.ruta.stem
@@ -958,6 +1105,7 @@ class Aplicacion(tk.Tk):
             if not messagebox.askyesno("Procesamiento en curso",
                                        "El video se está procesando. ¿Cerrar igual?"):
                 return
+        self._cerrar_video_control()
         self.destroy()
 
 
