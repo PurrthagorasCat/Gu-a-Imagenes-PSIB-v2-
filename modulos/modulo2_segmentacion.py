@@ -28,6 +28,8 @@ Carpetas (relativas a la raíz del proyecto):
                                     contorno superpuesto, frames extraídos
       resultados_imagen/         -> figuras y métricas de 2.1 y 2.2 sobre el
                                     frame de trabajo
+  Todos los archivos llevan el nombre del video: cada corrida borra solo los
+  resultados anteriores de ESE video, los de los demás se conservan.
 
 Uso (desde la raíz del proyecto o con el botón Run):
   python modulos/modulo2_segmentacion.py                       # video más reciente de videos/
@@ -88,7 +90,7 @@ ARCHIVO_REFERENCIAS = CARPETA_ANOTACIONES / "referencias.json"
 ARCHIVO_FRAMES = CARPETA_ANOTACIONES / "frames_referencia.json"   # frame sobre el que se marcó cada ROI
 
 NOMBRE_VIDEO = None       # p.ej. "registro_A1.MOV"; None = el más reciente de videos/
-BORRAR_RESULTADOS = True  # borrar resultados/resultados_modulo2 antes de empezar (--conservar-resultados)
+BORRAR_RESULTADOS = True  # borrar los resultados anteriores del mismo video antes de empezar (--conservar-resultados)
 PEDIR_ROI_SIEMPRE = True  # marcar el ROI en cada corrida (--usar-roi-guardado para reutilizar roi.json)
 ALTO_OVERLAY = 480        # alto del video overlay (sólo para visualizar)
 
@@ -166,7 +168,7 @@ def impar(valor, esc, minimo=3):
 # ----------------------------------------------------------------------------
 # Obtener el ROI
 # ----------------------------------------------------------------------------
-def seleccionar_roi(bgr, titulo="ROI: encerrar el IRIS con margen y apretar Enter (Esc = cancelar)"):
+def seleccionar_roi(bgr, titulo="ROI: encerrar el IRIS con margen y apretar Enter (c = cancelar)"):
     H, W = bgr.shape[:2]
     f = min(1.0, 900 / max(H, W))                 # que la ventana entre en pantalla
     vista = cv2.resize(bgr, None, fx=f, fy=f, interpolation=cv2.INTER_AREA) if f < 1 else bgr
@@ -178,8 +180,12 @@ def seleccionar_roi(bgr, titulo="ROI: encerrar el IRIS con margen y apretar Ente
         x, y, w, h = cv2.selectROI(titulo, vista, showCrosshair=True)
         cv2.destroyWindow(titulo)
     except cv2.error:
-        raise RuntimeError("No hay entorno gráfico para seleccionar el ROI: "
-                           "indicalo con --roi X Y ANCHO ALTO")
+        # Sin pantalla no se puede marcar: se marca una vez en una computadora con pantalla
+        # (pipeline o aplicación) y queda guardado en roi.json para las corridas siguientes
+        raise RuntimeError("No hay entorno gráfico para abrir la ventana del ROI. Marcalo una vez en una "
+                           "computadora con pantalla (pipeline_completo.py o la aplicación): queda guardado "
+                           "en anotaciones_manuales/roi.json. Con modulo2_segmentacion.py también se puede "
+                           "pasar con --roi X Y ANCHO ALTO")
     if w == 0 or h == 0:
         raise RuntimeError("Selección del ROI cancelada")
     return ROI(int(round(x / f)), int(round(y / f)), int(round(w / f)), int(round(h / f)))
@@ -1220,15 +1226,35 @@ def procesar_video(path, extraer=0, max_frames=None, rect=None, nuevo_roi=False,
     return filas, roi, fps, factor, r_iris, contornos
 
 
-def limpiar_resultados():
-    """Borra resultados/resultados_modulo2 de corridas anteriores (y la vuelve a crear vacía)."""
-    if CARPETA_RESULTADOS.exists():
-        shutil.rmtree(CARPETA_RESULTADOS, ignore_errors=True)
-        if CARPETA_RESULTADOS.exists():   # Windows: algún archivo abierto (p.ej. el overlay)
-            print("  [aviso] no se pudo borrar todo resultados_modulo2/ (¿hay un archivo abierto?)")
+def _borrar_archivos(carpeta, empieza, conservar=()):
+    """Borra los archivos de `carpeta` cuyo nombre empieza con `empieza`, salvo los de
+    `conservar`. Devuelve cuántos no se pudieron borrar (en Windows, si están abiertos)."""
+    fallidos = 0
+    if carpeta.is_dir():
+        for p in carpeta.iterdir():
+            if p.is_file() and p.name.startswith(empieza) and p.name not in conservar:
+                try:
+                    p.unlink()
+                except OSError:
+                    fallidos += 1
+    return fallidos
+
+
+def limpiar_resultados(stem):
+    """Borra los resultados anteriores del video `stem` (serie, video de control, frames
+    extraídos y figuras de sus frames de trabajo). Los de otros videos no se tocan, y los
+    frames anotados a mano tampoco (los usa la validación)."""
+    anotados = set(cargar_refs())
+    fallidos = sum(_borrar_archivos(OUT_VIDEO, nombre) for nombre in
+                   (f"{stem}_serie.csv", f"{stem}_serie.png", f"{stem}_overlay.mp4"))
+    fallidos += _borrar_archivos(OUT_VIDEO / "frames", f"{stem}_frame_", conservar=anotados)
+    fallidos += _borrar_archivos(OUT_IMAGEN, f"{stem}_frame_")
+    fallidos += _borrar_archivos(OUT_IMAGEN, f"metricas_{stem}.csv")
     OUT_VIDEO.mkdir(parents=True, exist_ok=True)
     OUT_IMAGEN.mkdir(parents=True, exist_ok=True)
-    print("Resultados anteriores del módulo 2 borrados")
+    print(f"Resultados anteriores de {stem} borrados (los de otros videos se conservan)")
+    if fallidos:   # Windows: algún archivo abierto (p.ej. el video de control)
+        print(f"  [aviso] no se pudieron borrar {fallidos} archivos de {stem} (¿hay alguno abierto?)")
 
 
 def abrir_escritor(destino, fps, tam):
@@ -1427,7 +1453,7 @@ def ejecutar_modulo2(ruta_video=None, rect=None, usar_roi_guardado=False, factor
     ruta = buscar_video(ruta_video)
     print(f"Video: {ruta.name}")
     if (BORRAR_RESULTADOS if borrar is None else borrar):
-        limpiar_resultados()
+        limpiar_resultados(ruta.stem)
     OUT_VIDEO.mkdir(parents=True, exist_ok=True)
     OUT_IMAGEN.mkdir(parents=True, exist_ok=True)
     nuevo_roi = rect is None and PEDIR_ROI_SIEMPRE and not usar_roi_guardado
@@ -1446,7 +1472,7 @@ def main():
     ap.add_argument("--usar-roi-guardado", action="store_true",
                     help="reutilizar el ROI guardado en anotaciones_manuales/roi.json")
     ap.add_argument("--conservar-resultados", action="store_true",
-                    help="no borrar resultados/resultados_modulo2 antes de empezar")
+                    help="no borrar los resultados anteriores de este video antes de empezar")
     ap.add_argument("--factor", type=float, default=None,
                     help="resolución de procesamiento (1 = original; por defecto el iris queda de 64 px de radio)")
     ap.add_argument("--frame", nargs="+", default=["auto"],
@@ -1464,7 +1490,10 @@ def main():
         return
     if a.imagen:
         if BORRAR_RESULTADOS and not a.conservar_resultados:
-            shutil.rmtree(OUT_IMAGEN, ignore_errors=True)
+            # Solo las figuras de morfología de estas imágenes: dependen del mejor método y
+            # pueden cambiar de nombre; el resto se sobrescribe. Lo demás no se toca
+            for p in a.imagen:
+                _borrar_archivos(OUT_IMAGEN, f"{Path(p).stem}_22_morfologia_")
         OUT_IMAGEN.mkdir(parents=True, exist_ok=True)
         filas = []
         for p in a.imagen:

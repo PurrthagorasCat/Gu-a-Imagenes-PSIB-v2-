@@ -14,6 +14,11 @@ Flujo: importación (módulo 0) -> ROI y mejoramiento (módulo 1) -> segmentaci�
 Uso:
     python pipeline_completo.py                      # usa RUTA_VIDEO
     python pipeline_completo.py registro_A2.MOV      # otro video de la carpeta videos/
+
+Video nuevo: lo único que se pide es el ROI. Se abre una ventana con un frame del video;
+se arrastra un rectángulo que encierre el iris con un poco de margen y se aprieta Enter
+(c cancela). Queda guardado en anotaciones_manuales/roi.json y el resto corre solo hasta
+el final. Si en ese frame el ojo está cerrado, cancelar e indicar otro en FRAME_REFERENCIA.
 """
 
 import sys
@@ -38,7 +43,8 @@ CARPETA_RESULTADOS = "resultados"
 # False: corre de punta a punta sin ventanas.
 MOSTRAR_PASOS = False
 
-# True: reutiliza el ROI guardado en anotaciones_manuales/roi.json para este video, si existe.
+# True: reutiliza el ROI guardado en anotaciones_manuales/roi.json para este video; si el
+#       video es nuevo (no tiene ROI guardado), abre la ventana para marcarlo una vez.
 # False: pide marcar el ROI con el mouse en cada corrida.
 USAR_ROI_GUARDADO = True
 
@@ -80,7 +86,7 @@ def ejecutar_pipeline(ruta_video=RUTA_VIDEO, frame_referencia=None):
                   {"Video": ruta.name,
                    "Resultados": f"{CARPETA_RESULTADOS}/",
                    "Ventanas": "sí" if MOSTRAR_PASOS else "no",
-                   "ROI": "guardado si existe" if USAR_ROI_GUARDADO else "marcar a mano",
+                   "ROI": "el guardado; si no hay, se marca a mano" if USAR_ROI_GUARDADO else "marcar a mano",
                    "Inicio": ui.fecha_hora()})
     total = 6
 
@@ -101,7 +107,12 @@ def ejecutar_pipeline(ruta_video=RUTA_VIDEO, frame_referencia=None):
     # 2. ROI y mejoramiento -------------------------------------------------------------
     figura_mejora = carpeta / "resultados_modulo1" / f"{ruta.stem}_mejoramiento.png"
     with ui.paso(2, total, "ROI y mejoramiento (Módulo 1)"):
-        preparacion = m2.preparar(ruta, nuevo_roi=m2.PEDIR_ROI_SIEMPRE and not USAR_ROI_GUARDADO,
+        nuevo_roi = m2.PEDIR_ROI_SIEMPRE and not USAR_ROI_GUARDADO
+        if nuevo_roi or m2.roi_guardado(ruta.name) is None:
+            # Única intervención: marcar el ROI (p. ej., la cátedra con un video nuevo)
+            ui.info("Hay que marcar el ROI: encerrar el iris con margen y apretar Enter (c cancela).")
+            ui.info("Si en ese frame el ojo está cerrado, cancelar e indicar otro en FRAME_REFERENCIA.")
+        preparacion = m2.preparar(ruta, nuevo_roi=nuevo_roi,
                                   frame_referencia=FRAME_REFERENCIA if frame_referencia is None else frame_referencia)
         k = preparacion["frame_referencia"]
         recorte, mejora, _ = m2.frame_mejorado(ruta, preparacion)   # frame de referencia, para mostrar
