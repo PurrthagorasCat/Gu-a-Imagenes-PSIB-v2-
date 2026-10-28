@@ -43,17 +43,15 @@ Uso (desde la raíz del proyecto o con el botón Run):
   python modulos/modulo2_segmentacion.py --anotar resultados/resultados_modulo2/resultados_video/frames/registro_A1_frame_0123.png
 Desde otro script (p.ej. pipeline_completo.py):
   from modulos import modulo2_segmentacion as m2
-  filas, r_iris = m2.ejecutar_modulo2("videos/registro_A1.MOV")
+  filas = m2.ejecutar_modulo2("videos/registro_A1.MOV")
 """
 import argparse
 import csv
 import json
-import os
 import shutil
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,9 +69,13 @@ from skimage.segmentation import active_contour, watershed
 from sklearn.cluster import KMeans
 
 try:
+    from . import modulo0_importacion as m0
     from . import modulo1_mejoramiento as m1
+    from .metricas import dice, iou
 except ImportError:   # ejecutado como script: python modulos/modulo2_segmentacion.py
+    import modulo0_importacion as m0
     import modulo1_mejoramiento as m1
+    from metricas import dice, iou
 
 
 # ============================================================================
@@ -168,29 +170,6 @@ def impar(valor, esc, minimo=3):
 # ----------------------------------------------------------------------------
 # Obtener el ROI
 # ----------------------------------------------------------------------------
-def seleccionar_roi(bgr, titulo="ROI: encerrar el IRIS con margen y apretar Enter (c = cancelar)"):
-    H, W = bgr.shape[:2]
-    f = min(1.0, 900 / max(H, W))                 # que la ventana entre en pantalla
-    vista = cv2.resize(bgr, None, fx=f, fy=f, interpolation=cv2.INTER_AREA) if f < 1 else bgr
-    print("  >>> Se abrió una ventana para marcar el ROI (si no la ves, puede haber quedado "
-          "detrás de otras ventanas). Encerrá el iris con margen y apretá Enter.", flush=True)
-    try:
-        cv2.namedWindow(titulo, cv2.WINDOW_NORMAL)
-        cv2.setWindowProperty(titulo, cv2.WND_PROP_TOPMOST, 1)    # adelante de todo
-        x, y, w, h = cv2.selectROI(titulo, vista, showCrosshair=True)
-        cv2.destroyWindow(titulo)
-    except cv2.error:
-        # Sin pantalla no se puede marcar: se marca una vez en una computadora con pantalla
-        # (pipeline o aplicación) y queda guardado en roi.json para las corridas siguientes
-        raise RuntimeError("No hay entorno gráfico para abrir la ventana del ROI. Marcalo una vez en una "
-                           "computadora con pantalla (pipeline_completo.py o la aplicación): queda guardado "
-                           "en anotaciones_manuales/roi.json. Con modulo2_segmentacion.py también se puede "
-                           "pasar con --roi X Y ANCHO ALTO")
-    if w == 0 or h == 0:
-        raise RuntimeError("Selección del ROI cancelada")
-    return ROI(int(round(x / f)), int(round(y / f)), int(round(w / f)), int(round(h / f)))
-
-
 def _leer_roi_json():
     if ARCHIVO_ROI.exists():
         return json.loads(ARCHIVO_ROI.read_text(encoding="utf-8"))
@@ -255,7 +234,7 @@ def obtener_roi(bgr, nombre, rect=None, nuevo=False):
         roi = roi_guardado(nombre)
         if roi is not None:
             return roi
-    roi = seleccionar_roi(bgr)
+    roi = ROI(*m0.seleccionar_roi(bgr, bgr=True))
     guardar_roi(nombre, roi)
     return roi
 
@@ -405,12 +384,6 @@ def circulo_inscripto(mask):
     return float(x), float(y), float(r)
 
 
-def region_analisis(shape, semilla):
-    """Región de análisis = el ROI completo (el recorte ya es el ROI)."""
-    h, w = shape[:2]
-    return (slice(0, h), slice(0, w)), semilla
-
-
 def componente_con_semilla(mask, semilla):
     """Se queda con la componente conexa que contiene a la semilla
     (o la más cercana si la semilla cayó en un hueco, p.ej. un reflejo)."""
@@ -425,18 +398,12 @@ def componente_con_semilla(mask, semilla):
     return lab == l
 
 
-def pegar(mask_roi, sl, shape):
-    full = np.zeros(shape[:2], bool)
-    full[sl] = mask_roi
-    return full
-
-
 # ----------------------------------------------------------------------------
 # 2.1 Métodos de segmentación
 # ----------------------------------------------------------------------------
-def seg_otsu(suave, sl, s_roi):
+def seg_otsu(suave, s_roi):
     """suave: gris suavizado por el módulo 1 (mejora["suave"])."""
-    g = suave[sl]
+    g = suave
     # (a) Otsu: umbral óptimo global sobre todo el ROI (máscara tal cual, sin
     #     post-procesar: incluye pestañas, sombras, etc. -> material para 2.2)
     t = threshold_otsu(g)
@@ -448,10 +415,10 @@ def seg_otsu(suave, sl, s_roi):
     return m, t, m_multi, t_multi
 
 
-def seg_kmeans(lab_suave, sl, s_roi, K, w_croma=0.5):
+def seg_kmeans(lab_suave, s_roi, K, w_croma=0.5):
     """Espacio de características: L (intensidad) + a,b (croma), ponderando el croma.
     lab_suave: Lab suavizado por el módulo 1 (mejora["lab_suave"])."""
-    r = lab_suave[sl].astype(np.float32)
+    r = lab_suave.astype(np.float32)
     feats = r.reshape(-1, 3).copy()
     feats[:, 1:] *= w_croma
     # en ROIs grandes (resolución original) se ajusta con una muestra de
@@ -465,7 +432,7 @@ def seg_kmeans(lab_suave, sl, s_roi, K, w_croma=0.5):
     return m, etiquetas
 
 
-def seg_snake(realzada, sl, centro, r0, n=200, init=None):
+def seg_snake(realzada, centro, r0, n=200, init=None):
     """Contorno activo inicializado como círculo que rodea a la pupila.
     realzada: imagen del módulo 1 con el rango de interés [0, F2] (mejora["realzada"]):
     todo lo más claro que la pupila queda "plano", así el único borde fuerte es
@@ -474,7 +441,7 @@ def seg_snake(realzada, sl, centro, r0, n=200, init=None):
     w_edge: atracción a bordes, gamma: paso temporal.
     init: contorno inicial (fila, col) dado (p.ej. la pupila del video); si no,
     un círculo de radio r0 alrededor de `centro`."""
-    img = realzada[sl]
+    img = realzada
     if init is None:
         t = np.linspace(0, 2 * np.pi, n)
         cx, cy = centro
@@ -488,12 +455,12 @@ def seg_snake(realzada, sl, centro, r0, n=200, init=None):
     return m, init, snake
 
 
-def seg_watershed(suave, sl, s_roi, m_semilla):
+def seg_watershed(suave, s_roi, m_semilla):
     """Watershed controlado por marcadores sobre el gradiente.
     Marcadores: 1 = núcleo de pupila, 2 = fondo (iris/esclerótica),
     3 = reflejos corneales (muy brillantes).
     suave: gris suavizado por el módulo 1 (mejora["suave"])."""
-    g = suave[sl] / 255.0
+    g = suave / 255.0
     grad = sobel(g)
     # el núcleo se toma de Otsu + apertura (corta los "puentes" hacia las
     # pestañas/pliegue del párpado) -> marcador confiable dentro de la pupila
@@ -509,48 +476,30 @@ def seg_watershed(suave, sl, s_roi, m_semilla):
 
 
 # ----------------------------------------------------------------------------
-# Métricas
+# Referencias manuales (frames anotados)
 # ----------------------------------------------------------------------------
-def dice(a, b):
-    i = np.logical_and(a, b).sum()
-    s = a.sum() + b.sum()
-    return 2 * i / s if s else 1.0
-
-
-def iou(a, b):
-    u = np.logical_or(a, b).sum()
-    return np.logical_and(a, b).sum() / u if u else 1.0
-
-
-def cargar_referencia(nombre, shape, info_roi):
-    """Las referencias se guardan en coordenadas de la IMAGEN ORIGINAL (así no
-    dependen de cómo se recorte) y se llevan al recorte con su transformación."""
+def cargar_refs():
+    """Contornos anotados a mano, {nombre de la imagen: puntos (x, y)}. Se guardan en
+    coordenadas de la imagen ORIGINAL (así no dependen de cómo se recorte)."""
     p = ARCHIVO_REFERENCIAS
-    if not p.exists():
-        return None
-    datos = json.loads(p.read_text(encoding="utf-8"))
-    if nombre not in datos:
-        return None
-    pts = a_recorte(datos[nombre], info_roi).astype(np.float32)
-    if len(pts) < 15:      # pocos puntos -> ajusta elipse (pupila ≈ elipse)
-        (cx, cy), (ax1, ax2), ang = cv2.fitEllipse(pts)
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+
+
+def ref_en_recorte(pts, info, shape):
+    """Máscara de la referencia en el recorte. Con pocos puntos se ajusta una elipse
+    (la pupila es aproximadamente una elipse)."""
+    q = a_recorte(pts, info).astype(np.float32)
+    if len(q) < 15:
+        (cx, cy), ax, ang = cv2.fitEllipse(q)
         m = np.zeros(shape[:2], np.uint8)
-        cv2.ellipse(m, ((cx, cy), (ax1, ax2), ang), 1, -1)
+        cv2.ellipse(m, ((cx, cy), ax, ang), 1, -1)
         return m.astype(bool)
-    return polygon2mask(shape[:2], pts[:, ::-1])          # (fila, col)
+    return polygon2mask(shape[:2], q[:, ::-1])
 
 
 # ----------------------------------------------------------------------------
 # 2.2 Morfología
 # ----------------------------------------------------------------------------
-def mayor_componente(m):
-    lab, n = ndi.label(m)
-    if n == 0:
-        return m
-    tam = ndi.sum(m, lab, range(1, n + 1))
-    return lab == (np.argmax(tam) + 1)
-
-
 def variantes_morfologicas(m, r, semilla):
     se = disk(r)
     v = {
@@ -661,13 +610,11 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
         yy, xx = np.mgrid[0:gris.shape[0], 0:gris.shape[1]]
         pupila_v = np.hypot(xx - x, yy - y) <= max(r, 2)
         print(f"  punto de partida: estimación simple de la pupila (radio ≈ {r:.1f} px del recorte)")
-    sl, s_roi = region_analisis(gris.shape, semilla)
-    ref = cargar_referencia(nombre, gris.shape, info_roi)
-    ref_r = ref[sl] if ref is not None else None
-    rgb_r = rgb[sl]
+    refs = cargar_refs()
+    ref_r = ref_en_recorte(refs[nombre], info_roi, gris.shape) if nombre in refs else None
 
     # ---- 2.1 -------------------------------------------------------------
-    m_otsu, t_roi, m_multi, t_multi = seg_otsu(mejora["suave"], sl, s_roi)
+    m_otsu, t_roi, m_multi, t_multi = seg_otsu(mejora["suave"], semilla)
     # estimación gruesa de centro/radio de la pupila para inicializar la snake:
     # centro y radio del mayor círculo inscripto en la zona oscura (máximo de la
     # transformada de distancia). No le afectan las pestañas o la sombra del
@@ -676,7 +623,7 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
         cx0, cy0, r_est = circulo_inscripto(pupila_v)
     else:
         cx0, cy0, r_est = circulo_inscripto(ndi.binary_fill_holes(m_multi))
-    km = {K: seg_kmeans(mejora["lab_suave"], sl, s_roi, K) for K in range(2, 6)}
+    km = {K: seg_kmeans(mejora["lab_suave"], semilla, K) for K in range(2, 6)}
     init_v = None
     if pupila_v is not None:
         # contorno de partida agrandado un 25 % (igual que en el seguimiento del video)
@@ -685,9 +632,9 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
         c = c[np.linspace(0, len(c) - 1, 200, endpoint=False).astype(int)]
         cen = c.mean(0)
         init_v = cen + 1.25 * (c - cen)
-    m_snake, init, snake = seg_snake(mejora["realzada"], sl, (cx0, cy0), 1.2 * r_est, init=init_v)
+    m_snake, init, snake = seg_snake(mejora["realzada"], (cx0, cy0), 1.2 * r_est, init=init_v)
     # marcador de pupila del Watershed: el punto de partida (pupila del video o estimación)
-    m_ws, et_ws, grad, marc = seg_watershed(mejora["suave"], sl, s_roi,
+    m_ws, et_ws, grad, marc = seg_watershed(mejora["suave"], semilla,
                                             pupila_v if pupila_v is not None else m_multi)
 
     metodos = {f"Otsu (T={t_roi:.0f})": m_otsu,
@@ -707,11 +654,11 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
     n = len(metodos) + 1
     fig, ax = plt.subplots(2, (n + 1) // 2, figsize=(3 * ((n + 1) // 2), 6.5))
     ax = ax.ravel()
-    ax[0].imshow(rgb_r); ax[0].set_title("ROI (verde = ref.)", fontsize=8)
+    ax[0].imshow(rgb); ax[0].set_title("ROI (verde = ref.)", fontsize=8)
     if ref_r is not None:
-        ax[0].imshow(overlay(rgb_r, np.zeros_like(ref_r), ref=ref_r))
+        ax[0].imshow(overlay(rgb, np.zeros_like(ref_r), ref=ref_r))
     for a, (k, m), f in zip(ax[1:], metodos.items(), filas):
-        a.imshow(overlay(rgb_r, m, ref=ref_r))
+        a.imshow(overlay(rgb, m, ref=ref_r))
         a.set_title(f"{k}\nDice={f[3]:.2f} IoU={f[4]:.2f}", fontsize=8)
     for a in ax:
         a.axis("off")
@@ -722,11 +669,11 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
     # Figura de diagnóstico: Otsu global, clusters, snake, watershed
     fig, ax = plt.subplots(2, 4, figsize=(13, 6.5))
     ax[0, 0].imshow(m_otsu, cmap="gray"); ax[0, 0].set_title(f"Otsu en el ROI (T={t_roi:.0f})")
-    ax[0, 1].hist(mejora["suave"][sl].ravel(), 64, color="gray"); ax[0, 1].axvline(t_roi, color="r")
+    ax[0, 1].hist(mejora["suave"].ravel(), 64, color="gray"); ax[0, 1].axvline(t_roi, color="r")
     ax[0, 1].set_title("Histograma ROI suavizado + umbral Otsu")
     for i, K in enumerate([3, 5]):
         ax[0, 2 + i].imshow(km[K][1], cmap="tab10"); ax[0, 2 + i].set_title(f"K-means K={K} (clusters)")
-    ax[1, 0].imshow(mejora["realzada"][sl], cmap="gray")
+    ax[1, 0].imshow(mejora["realzada"], cmap="gray")
     ax[1, 0].plot(init[:, 1], init[:, 0], "--b", lw=1, label="inicial")
     ax[1, 0].plot(snake[:, 1], snake[:, 0], "-r", lw=1.5, label="final")
     ax[1, 0].legend(fontsize=7); ax[1, 0].set_title("Snake (imagen realzada, módulo 1)")
@@ -748,12 +695,11 @@ def procesar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iri
     mejor_px = max(por_pixel, key=puntaje) if ref_r is not None else "Watershed"
     k_multi = next(k for k in candidatos if "multinivel" in k)
     for metodo in dict.fromkeys([k_multi, mejor_px, "Snake"]):
-        filas += analizar_morfologia(rgb_r, candidatos[metodo], ref_r, nombre, stem, metodo, s_roi)
+        filas += analizar_morfologia(rgb, candidatos[metodo], ref_r, nombre, stem, metodo, semilla)
     return filas
 
 
 def guardar_metricas(filas, archivo, mostrar=True):
-    import csv
     with open(archivo, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f); w.writerow(["imagen", "etapa", "metodo", "dice", "iou"]); w.writerows(filas)
     if mostrar:
@@ -764,72 +710,6 @@ def guardar_metricas(filas, archivo, mostrar=True):
 # ============================================================================
 # VIDEO
 # ============================================================================
-# ----------------------------------------------------------------------------
-# Lectura del video (con rutas no ASCII en Windows)
-# ----------------------------------------------------------------------------
-@contextmanager
-def abrir_video(path):
-    """Abre el video y GARANTIZA liberar los recursos al salir (aunque haya un
-    error o se corte el proceso con Ctrl+C).
-
-    En Windows, cv2.VideoCapture no abre rutas con caracteres no ASCII (p.ej.
-    "Señales"). Se prueba en este orden, de más barato a más caro:
-      1. ruta corta 8.3 de Windows (suele ser ASCII);
-      2. si sólo la CARPETA tiene acentos y el nombre del archivo no: abrir con
-         la ruta relativa desde la carpeta del video (no copia nada);
-      3. último recurso: copia temporal, que se borra SIEMPRE al salir.
-    En Linux y macOS no hace falta nada de esto."""
-    path = _ruta(path, CARPETA_VIDEOS)
-    if not path.exists():
-        raise FileNotFoundError(path)
-    tmp_dir = None
-    cap = None
-    try:
-        if sys.platform == "win32" and not str(path).isascii():
-            corta = _ruta_corta_windows(path)
-            if corta and corta.isascii():
-                cap = cv2.VideoCapture(corta)
-            elif path.name.isascii():
-                cwd = os.getcwd()
-                try:
-                    os.chdir(path.parent)
-                    cap = cv2.VideoCapture(path.name)
-                finally:
-                    os.chdir(cwd)
-            else:
-                tmp_dir = Path(tempfile.mkdtemp())
-                copia = tmp_dir / ("video" + path.suffix)
-                print(f"  (copiando el video a {tmp_dir} por el nombre con acentos)")
-                shutil.copy(path, copia)
-                cap = cv2.VideoCapture(str(copia))
-        else:
-            cap = cv2.VideoCapture(str(path))
-        if not cap.isOpened():
-            raise IOError(f"No se pudo abrir el video {path}")
-        yield cap
-    finally:
-        if cap is not None:
-            cap.release()
-        if tmp_dir is not None:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-
-def _ruta_corta_windows(path):
-    """Nombre corto 8.3 de Windows (p.ej. C:\\Users\\Facu\\DESKTOP\\PROCES~1\\...)."""
-    try:
-        import ctypes
-        buf = ctypes.create_unicode_buffer(1024)
-        n = ctypes.windll.kernel32.GetShortPathNameW(str(path), buf, 1024)
-        return buf.value if n else None
-    except Exception:
-        return None
-
-
-def fps_de(cap):
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    return fps if fps and np.isfinite(fps) and fps > 0 else 30.0
-
-
 def leer_frames(cap, max_frames=None, buffer=8):
     """Lee los frames en un hilo aparte: mientras se procesa un frame ya se
     está decodificando el siguiente (decodificar un frame 4K tarda ~0.1 s)."""
@@ -872,7 +752,7 @@ def leer_frames(cap, max_frames=None, buffer=8):
 def inicializar(path, rect=None, nuevo_roi=False, indice=0):
     """ROI manual del video: --roi, el guardado en roi.json o, si no hay, se
     marca con el mouse sobre el frame `indice` (y se guarda en roi.json)."""
-    with abrir_video(path) as cap:
+    with m0.abrir_video(_ruta(path, CARPETA_VIDEOS)) as cap:
         if indice:
             cap.set(cv2.CAP_PROP_POS_FRAMES, indice)
         ok, f = cap.read()
@@ -891,8 +771,8 @@ def calibrar_escala(path, roi, n=10, t=2.0, inicio=0):
     los t segundos que siguen al frame `inicio` y se toma la mediana
     (descarta parpadeos)."""
     radios = []
-    with abrir_video(path) as cap:
-        fps = fps_de(cap)
+    with m0.abrir_video(_ruta(path, CARPETA_VIDEOS)) as cap:
+        fps = m0.fps_de(cap)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         f_rap = min(1.0, 600 / max(roi.w, roi.h))          # sólo para que sea rápido
         fin = min(total, inicio + a_frames(t, fps))
@@ -995,7 +875,8 @@ def ancho_horizontal(contorno, paso=0.1):
 
 def calidad(mask, mejora, r_ref):
     """Devuelve (válido, motivo, medidas). Rangos fisiológicos con el iris
-    de referencia r_ref (deducido del tamaño del ROI): la pupila mide entre
+    de referencia r_ref (estimado a partir de la pupila al comienzo del video,
+    ver calibrar_escala): la pupila mide entre
     ~10 % y ~90 % del iris. De la mejora del módulo 1 se usan el gris sin
     filtrar (oscuridad y contraste) y el umbral F2."""
     if mask is None or mask.sum() < 10:
@@ -1037,24 +918,6 @@ def calidad(mask, mejora, r_ref):
 
 
 # ----------------------------------------------------------------------------
-# Referencias manuales (frames anotados)
-# ----------------------------------------------------------------------------
-def cargar_refs():
-    p = ARCHIVO_REFERENCIAS
-    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-
-
-def ref_en_recorte(pts, info, shape):
-    q = a_recorte(pts, info).astype(np.float32)
-    if len(q) < 15:
-        (cx, cy), ax, ang = cv2.fitEllipse(q)
-        m = np.zeros(shape[:2], np.uint8)
-        cv2.ellipse(m, ((cx, cy), ax, ang), 1, -1)
-        return m.astype(bool)
-    return polygon2mask(shape[:2], q[:, ::-1])
-
-
-# ----------------------------------------------------------------------------
 # Programa principal
 # ----------------------------------------------------------------------------
 def preparar(path, rect=None, nuevo_roi=False, factor=None, frame_referencia=None):
@@ -1083,7 +946,7 @@ def frame_mejorado(path, preparacion, indice=None):
     Devuelve (recorte BGR, mejora, info del recorte)."""
     if indice is None:
         indice = preparacion.get("frame_referencia", 0)
-    with abrir_video(path) as cap:
+    with m0.abrir_video(_ruta(path, CARPETA_VIDEOS)) as cap:
         if indice:
             cap.set(cv2.CAP_PROP_POS_FRAMES, indice)
         ok, frame = cap.read()
@@ -1110,8 +973,8 @@ def procesar_video(path, extraer=0, max_frames=None, rect=None, nuevo_roi=False,
     filas, metricas = [], []
     tmp_out_dir = Path(tempfile.mkdtemp())
     try:
-        with abrir_video(path) as cap:
-            fps = fps_de(cap)
+        with m0.abrir_video(_ruta(path, CARPETA_VIDEOS)) as cap:
+            fps = m0.fps_de(cap)
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             if max_frames:
                 total = min(total, max_frames)
@@ -1201,10 +1064,9 @@ def procesar_video(path, extraer=0, max_frames=None, rect=None, nuevo_roi=False,
                 print(f"\n  [interrumpido] se guardan los {len(filas)} frames procesados")
             if escritor is not None:
                 escritor.release()
-        # columnas relativas al iris de referencia (las usa el módulo 3)
+        # escala usada en todo el video (la lee la validación del notebook, sección 7)
         for f in filas:
-            f["pupila_iris"] = f["d_pupila_px"] / (2 * r_iris)
-            f["d_area_iris"] = f["d_area_px"] / (2 * r_iris)
+            f["r_iris_px"] = r_iris
         # PRIMERO se guardan los resultados (serie, gráfico, métricas) y recién
         # después se mueve el overlay: si algo falla con el video de salida, la
         # medición no se pierde
@@ -1308,7 +1170,7 @@ def analizar_frames(path, filas, roi, pedidos, fps, factor=None, r_iris=None, co
     elegidos = elegir_frames(filas, pedidos, fps)
     (OUT_VIDEO / "frames").mkdir(parents=True, exist_ok=True)
     filas_img = []
-    with abrir_video(path) as cap:
+    with m0.abrir_video(_ruta(path, CARPETA_VIDEOS)) as cap:
         for i, tipo in sorted(elegidos.items()):
             cap.set(cv2.CAP_PROP_POS_FRAMES, i)
             ok, frame = cap.read()
@@ -1342,7 +1204,7 @@ def marcar_atipicos(filas, ventana, tol=0.15):
         med = np.median(vec)
         if abs(d[i] - med) > tol * med:
             filas[i].update(valido=0, motivo=f"atípico ({d[i]:.1f} vs {med:.1f} px)",
-                            d_pupila_px=np.nan, pupila_iris=np.nan)
+                            d_pupila_px=np.nan)
 
 
 def guardar_resultados(filas, metricas, stem, fps=30.0):
@@ -1447,9 +1309,8 @@ def ejecutar_modulo2(ruta_video=None, rect=None, usar_roi_guardado=False, factor
     todo el video y análisis 2.1/2.2 sobre el/los frame(s) de trabajo.
     preparacion: ROI, escala y resolución ya calculados con preparar() (el
     pipeline los calcula antes, en el paso del módulo 1); si no, se calculan acá.
-    Devuelve (filas, r_iris): la serie frame a frame (lista de diccionarios,
-    también guardada en CSV) y el radio de iris de referencia en px del video
-    original (escala usada por el módulo 3)."""
+    Devuelve la serie frame a frame (lista de diccionarios, también guardada
+    en CSV), que es la entrada del módulo 3."""
     ruta = buscar_video(ruta_video)
     print(f"Video: {ruta.name}")
     if (BORRAR_RESULTADOS if borrar is None else borrar):
@@ -1460,7 +1321,7 @@ def ejecutar_modulo2(ruta_video=None, rect=None, usar_roi_guardado=False, factor
     filas, roi, fps, factor, r_iris, contornos = procesar_video(ruta, extraer, max_frames,
                                                                rect, nuevo_roi, factor, preparacion)
     analizar_frames(ruta, filas, roi, list(frames), fps, factor, r_iris, contornos)
-    return filas, r_iris
+    return filas
 
 
 def main():

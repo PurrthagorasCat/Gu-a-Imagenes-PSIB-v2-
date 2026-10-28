@@ -5,66 +5,131 @@ Apertura de los videos (.MOV), lectura de metadatos y frames, y visualización d
 """
 
 import os                        # Rutas alternativas para abrir el video en Windows
+import shutil                    # Copia temporal del video (último recurso en Windows)
 import sys                       # Detectar Windows
+import tempfile                  # Carpeta para esa copia temporal
+from contextlib import contextmanager  # Para usar abrir_video con "with"
+from pathlib import Path
 import cv2                       # OpenCV: lectura de video, procesamiento de imágenes y ventanas
 import numpy as np               # Cálculo numérico (arrays, linspace, ceil)
 import matplotlib.pyplot as plt  # Gráficos para mostrar frames sueltos
 from matplotlib.patches import Rectangle, ConnectionPatch  # Recuadro de la ROI y flecha entre gráficos
+
+RAIZ = Path(__file__).resolve().parent.parent   # Carpeta del proyecto
+CARPETA_VIDEOS = RAIZ / "videos"
 
 
 # ------------------------------------------------------------
 # Importación
 # ------------------------------------------------------------
 
+@contextmanager
 def abrir_video(ruta):
     """
-    Abre el video y devuelve el objeto de lectura y un diccionario con sus metadatos.
+    Abre el video para usarlo con "with" y lo libera al salir, aunque haya un error
+    o se corte el proceso con Ctrl+C:
+
+        with abrir_video(ruta) as video:
+            metadatos = leer_metadatos(video, ruta)
+
+    La ruta puede ser absoluta, relativa a la carpeta actual o el nombre de un video de videos/.
+
+    En Windows, cv2.VideoCapture no abre rutas con caracteres no ASCII (p. ej. "Señales").
+    Se prueba en este orden, de más barato a más caro:
+      1. la ruta corta 8.3 de Windows (suele ser ASCII);
+      2. si solo la carpeta tiene acentos y el nombre del archivo no, se abre con el nombre
+         desde la carpeta del video (no copia nada);
+      3. como último recurso, una copia temporal, que se borra siempre al salir.
+    En Linux y macOS no hace falta nada de esto.
+    """
+    ruta = Path(ruta)
+    if not ruta.exists() and (CARPETA_VIDEOS / ruta).exists():
+        ruta = CARPETA_VIDEOS / ruta
+    if not ruta.exists():
+        raise FileNotFoundError(f"No existe el video: {ruta}")
+    carpeta_temporal = None
+    video = None
+    try:
+        if sys.platform == "win32" and not str(ruta).isascii():
+            corta = _ruta_corta_windows(ruta)
+            if corta and corta.isascii():
+                video = cv2.VideoCapture(corta)
+            elif ruta.name.isascii():
+                actual = os.getcwd()
+                try:
+                    os.chdir(ruta.parent)
+                    video = cv2.VideoCapture(ruta.name)
+                finally:
+                    os.chdir(actual)
+            else:
+                carpeta_temporal = Path(tempfile.mkdtemp())
+                copia = carpeta_temporal / ("video" + ruta.suffix)
+                print(f"  (copiando el video a {carpeta_temporal} por el nombre con acentos)")
+                shutil.copy(ruta, copia)
+                video = cv2.VideoCapture(str(copia))
+        else:
+            video = cv2.VideoCapture(str(ruta))
+        if not video.isOpened():
+            # La ruta existe, pero OpenCV no soporta el formato o el archivo está dañado
+            raise IOError(f"No se pudo abrir el video: {ruta}")
+        yield video
+    finally:
+        if video is not None:
+            video.release()
+        if carpeta_temporal is not None:
+            shutil.rmtree(carpeta_temporal, ignore_errors=True)
+
+
+def _ruta_corta_windows(ruta):
+    """Nombre corto 8.3 de Windows (p. ej. C:\\Users\\Facu\\DESKTOP\\PROCES~1\\...), o None."""
+    try:
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(1024)
+        n = ctypes.windll.kernel32.GetShortPathNameW(str(ruta), buffer, 1024)
+        return buffer.value if n else None
+    except Exception:
+        return None
+
+
+def fps_de(video):
+    """Frames por segundo del video. Algunos archivos no los informan: en ese caso se supone 30."""
+    fps = video.get(cv2.CAP_PROP_FPS)
+    return fps if fps and np.isfinite(fps) and fps > 0 else 30.0
+
+
+def leer_metadatos(video, ruta=""):
+    """
+    Devuelve un diccionario con los metadatos del video ya abierto.
 
     Las dimensiones se toman del primer frame y no del encabezado del archivo,
     ya que los videos de celular guardan la orientación aparte y podría ser que
     el encabezado informe el ancho y alto invertidos.
     """
-    # Se corrobora que el video se haya abierto correctamente
-    # ================================================================================== #
-    video = cv2.VideoCapture(str(ruta))
-    if not video.isOpened() and sys.platform == "win32" and not str(ruta).isascii():
-        # En Windows, OpenCV puede fallar con rutas con tildes o eñes (p. ej. "Guía imágenes"):
-        # se prueba con la ruta relativa a la carpeta actual, que suele no tenerlas
-        video = cv2.VideoCapture(os.path.relpath(str(ruta)))
-    if not video.isOpened():
-        # El archivo no existe, la ruta es incorrecta o OpenCV no soporta el formato
-        raise FileNotFoundError(f"No se pudo abrir el video: {ruta}")
-
     # Se intenta leer el primer frame: read() devuelve (éxito, imagen)
-    ok, primer_frame = video.read()
-    if not ok: # Si el archivo se abrió pero está vacío/corrupto o falta el códec para decodificarlo
-        raise ValueError(f"El video se abrió pero no se pudo leer ningún frame: {ruta}")
-    # Al leer, el lector avanzó un frame; se lo vuelve al inicio para no "perder" el frame 0
+    posicion = video.get(cv2.CAP_PROP_POS_FRAMES)
     video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-    # ================================================================================== #
+    ok, primer_frame = video.read()
+    if not ok:  # Si el archivo se abrió pero está vacío/corrupto o falta el códec para decodificarlo
+        raise ValueError(f"El video se abrió pero no se pudo leer ningún frame: {ruta}")
+    # Al leer, el lector avanzó un frame; se lo vuelve a donde estaba para no "perder" frames
+    video.set(cv2.CAP_PROP_POS_FRAMES, posicion)
 
-    # Lectura de metadatos
-    # ================================================================================== #
     alto, ancho, canales = primer_frame.shape
-    fps = video.get(cv2.CAP_PROP_FPS)                                # Frames por segundo
-    if not np.isfinite(fps) or fps <= 0:
-        fps = 30.0   # Algunos archivos no informan los fps; se supone 30, como en el módulo 2
+    fps = fps_de(video)
     cantidad_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))       # Total de frames (estimado por el encabezado)
     codigo = int(video.get(cv2.CAP_PROP_FOURCC))                     # Códec codificado como un entero de 32 bits
-
-    metadatos = {
+    return {
         "ruta": str(ruta),
         "ancho": ancho,
         "alto": alto,
         "canales": canales,
         "fps": fps,
         "cantidad_frames": cantidad_frames,
-        "duracion_s": cantidad_frames / fps if fps > 0 else 0.0,
+        "duracion_s": cantidad_frames / fps,
         # El FOURCC empaqueta 4 caracteres (1 byte cada uno) en un entero: se extrae cada
         # byte desplazando 8 bits por vez y se lo convierte a letra (ej. "avc1", "hvc1")
         "codec": "".join(chr((codigo >> 8 * i) & 0xFF) for i in range(4)),
     }
-    return video, metadatos
 
 
 def imprimir_metadatos(metadatos):
@@ -100,9 +165,11 @@ def leer_frame(video, indice):
 # Región de interés (ROI)
 # ------------------------------------------------------------
 
-def seleccionar_roi(frame, alto_max=900, ancho_max=1400):
+def seleccionar_roi(frame, bgr=False, alto_max=900, ancho_max=1400,
+                    titulo="ROI: encerrar el iris con margen y apretar Enter (c = cancelar)"):
     """
-    Abre una ventana para seleccionar la ROI a mano sobre el frame (en RGB).
+    Abre una ventana para seleccionar la ROI a mano sobre el frame (en RGB, o en BGR
+    si bgr=True, como lo lee OpenCV).
 
     Se arrastra un rectángulo con el mouse y se confirma con Enter o Espacio;
     la tecla c cancela. Si el frame no entra en pantalla se muestra achicado,
@@ -115,17 +182,29 @@ def seleccionar_roi(frame, alto_max=900, ancho_max=1400):
     escala = min(1.0, alto_max / alto, ancho_max / ancho)
     # INTER_AREA es la interpolación recomendada para reducir imágenes (evita el aliasing)
     vista = cv2.resize(frame, None, fx=escala, fy=escala, interpolation=cv2.INTER_AREA)
-    vista = cv2.cvtColor(vista, cv2.COLOR_RGB2BGR)  # La ventana de OpenCV espera BGR
+    if not bgr:
+        vista = cv2.cvtColor(vista, cv2.COLOR_RGB2BGR)  # La ventana de OpenCV espera BGR
 
-    # selectROI bloquea el programa hasta que se confirma o cancela, y devuelve el rectángulo elegido
-    titulo = "Seleccionar ROI - Enter confirma, c cancela"
-    x, y, w, h = cv2.selectROI(titulo, vista, showCrosshair=True, fromCenter=False)
-    cv2.destroyAllWindows()
-    cv2.waitKey(1)  # Esta línea es necesaria para que la ventana se cierre al usarla desde Jupyter
+    print("  >>> Se abrió una ventana para marcar el ROI (si no la ves, puede haber quedado "
+          "detrás de otras ventanas). Encerrá el iris con margen y apretá Enter.", flush=True)
+    try:
+        cv2.namedWindow(titulo, cv2.WINDOW_NORMAL)
+        cv2.setWindowProperty(titulo, cv2.WND_PROP_TOPMOST, 1)    # Adelante de todo
+        # selectROI bloquea el programa hasta que se confirma o cancela, y devuelve el rectángulo elegido
+        x, y, w, h = cv2.selectROI(titulo, vista, showCrosshair=True, fromCenter=False)
+        cv2.destroyWindow(titulo)
+        cv2.waitKey(1)  # Necesario para que la ventana se cierre al usarla desde Jupyter
+    except cv2.error:
+        # Sin pantalla no se puede marcar: se marca una vez en una computadora con pantalla
+        # (pipeline o aplicación) y queda guardado en roi.json para las corridas siguientes
+        raise RuntimeError("No hay entorno gráfico para abrir la ventana del ROI. Marcalo una vez en una "
+                           "computadora con pantalla (pipeline_completo.py o la aplicación): queda guardado "
+                           "en anotaciones_manuales/roi.json. Con modulo2_segmentacion.py también se puede "
+                           "pasar con --roi X Y ANCHO ALTO")
 
     if w == 0 or h == 0:
         # Se canceló o no se arrastró ningún rectángulo
-        raise ValueError("No se seleccionó ninguna región")
+        raise RuntimeError("Selección del ROI cancelada")
     # Las coordenadas están en la vista achicada, así que se dividen por la escala
     # para llevarlas al tamaño original del frame
     return tuple(int(round(v / escala)) for v in (x, y, w, h))
@@ -182,7 +261,12 @@ def reproducir_video(ruta, alto_ventana=720):
 
     Controles:  Espacio = pausa / continuar   |   q o Esc = cerrar
     """
-    video, metadatos = abrir_video(ruta)
+    with abrir_video(ruta) as video:
+        _reproducir(video, leer_metadatos(video, ruta), alto_ventana)
+
+
+def _reproducir(video, metadatos, alto_ventana):
+    """Bucle de reproducción de reproducir_video, con el video ya abierto."""
     fps = metadatos["fps"]
     # Tiempo de espera entre frames (en ms) para reproducir a velocidad real; mínimo 1 ms
     espera_ms = max(1, int(1000 / fps))
@@ -212,8 +296,7 @@ def reproducir_video(ruta, alto_ventana=720):
         if tecla == ord(" "):
             pausado = not pausado    # Alterna entre pausa y reproducción
 
-    # Se liberan el archivo de video y las ventanas abiertas por OpenCV
-    video.release()
+    # Se cierran las ventanas abiertas por OpenCV (el video lo libera abrir_video)
     cv2.destroyAllWindows()
 
 

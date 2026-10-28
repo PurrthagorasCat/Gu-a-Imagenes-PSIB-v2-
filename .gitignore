@@ -13,4 +13,3 @@ videos/*.mov
 
 # Salidas generadas al correr el pipeline
 resultados/*.csv
-modulos/Modulo2_segmentacion/resultados_video/registro_*

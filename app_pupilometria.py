@@ -165,7 +165,8 @@ class SelectorROI(tk.Toplevel):
         self.resizable(False, False)
         self.configure(background=PALETA["fondo"])
         self.resultado = None
-        self.video, _ = m0.abrir_video(ruta)
+        self._pila_video = ExitStack()   # Mantiene el video abierto mientras está la ventana
+        self.video = self._pila_video.enter_context(m0.abrir_video(ruta))
         self.fps = metadatos["fps"]
         self.total = metadatos["cantidad_frames"]
         self.posicion = 0          # Frame que devuelve el próximo read()
@@ -330,7 +331,7 @@ class SelectorROI(tk.Toplevel):
         self.destroy()
 
     def destroy(self):
-        self.video.release()
+        self._pila_video.close()
         super().destroy()
 
 
@@ -658,15 +659,15 @@ class Aplicacion(tk.Tk):
         ruta = Path(ruta)
         indice = m2.frame_referencia_guardado(ruta.name) or 0   # El elegido en una corrida anterior
         try:
-            video, metadatos = m0.abrir_video(ruta)
-            if indice:
-                video.set(cv2.CAP_PROP_POS_FRAMES, indice)
-            ok, bgr = video.read()
-            if not ok and indice:   # Si ese frame no se puede leer, se vuelve al primero
-                indice = 0
-                video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            with m0.abrir_video(ruta) as video:
+                metadatos = m0.leer_metadatos(video, ruta)
+                if indice:
+                    video.set(cv2.CAP_PROP_POS_FRAMES, indice)
                 ok, bgr = video.read()
-            video.release()
+                if not ok and indice:   # Si ese frame no se puede leer, se vuelve al primero
+                    indice = 0
+                    video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ok, bgr = video.read()
             if not ok:
                 raise ValueError("No se pudo leer el primer frame")
         except Exception as e:
@@ -993,8 +994,8 @@ class Aplicacion(tk.Tk):
         control = m2.OUT_VIDEO / f"{self.ruta.stem}_overlay.mp4"
         fuente = control if control.exists() else self.ruta
         try:
-            # m2.abrir_video resuelve las rutas con acentos en Windows; la pila lo mantiene abierto
-            self._video_control = self._pila_video.enter_context(m2.abrir_video(fuente))
+            # m0.abrir_video resuelve las rutas con acentos en Windows; la pila lo mantiene abierto
+            self._video_control = self._pila_video.enter_context(m0.abrir_video(fuente))
         except Exception as e:
             self._video_control = None
             self.lbl_fuente.configure(text=f"No se pudo abrir el video para recorrer la curva: {e}")

@@ -1,96 +1,96 @@
 imagen,etapa,metodo,dice,iou
-registro_A1_frame_0177.png,2.1,Otsu (T=128),nan,nan
-registro_A1_frame_0177.png,2.1,Otsu multinivel (T=112),nan,nan
-registro_A1_frame_0177.png,2.1,K-means K=2,nan,nan
-registro_A1_frame_0177.png,2.1,K-means K=3,nan,nan
-registro_A1_frame_0177.png,2.1,K-means K=4,nan,nan
-registro_A1_frame_0177.png,2.1,K-means K=5,nan,nan
-registro_A1_frame_0177.png,2.1,Snake,nan,nan
-registro_A1_frame_0177.png,2.1,Watershed,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=2px,original,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=2px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=2px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=2px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=2px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=2px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=2px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=2px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=4px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=4px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=4px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=4px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=4px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=4px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=4px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=6px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=6px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=6px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=6px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=6px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=6px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=6px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=8px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=8px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=8px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=8px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=8px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=8px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Otsu multinivel (T=112)] r=8px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=2px,original,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=2px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=2px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=2px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=2px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=2px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=2px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=2px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=4px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=4px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=4px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=4px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=4px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=4px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=4px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=6px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=6px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=6px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=6px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=6px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=6px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=6px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=8px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=8px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=8px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=8px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=8px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=8px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Watershed] r=8px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=2px,original,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=2px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=2px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=2px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=2px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=2px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=2px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=2px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=4px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=4px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=4px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=4px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=4px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=4px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=4px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=6px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=6px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=6px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=6px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=6px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=6px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=6px,apertura+CC+cierre+relleno,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=8px,erosion,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=8px,dilatacion,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=8px,apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=8px,cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=8px,cierre+apertura,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=8px,apertura+cierre,nan,nan
-registro_A1_frame_0177.png,2.2 [Snake] r=8px,apertura+CC+cierre+relleno,nan,nan
+registro_A1_frame_2935.png,2.1,Otsu (T=94),0.05779493584648575,0.029757380882782812
+registro_A1_frame_2935.png,2.1,Otsu multinivel (T=63),0.07974931453192323,0.04153067885117494
+registro_A1_frame_2935.png,2.1,K-means K=2,0.05947767152900851,0.03065034122842232
+registro_A1_frame_2935.png,2.1,K-means K=3,0.08096500530222693,0.04219047882187163
+registro_A1_frame_2935.png,2.1,K-means K=4,0.0992686494392979,0.052226554483890825
+registro_A1_frame_2935.png,2.1,K-means K=5,0.13346735425225068,0.07150550222430344
+registro_A1_frame_2935.png,2.1,Snake,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.1,Watershed,0.9329183955739973,0.8742709008425146
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=2px,original,0.07974931453192323,0.04153067885117494
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=2px,erosion,0.08434833043334163,0.04403114186851211
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=2px,dilatacion,0.07632710186943917,0.03967779654410809
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=2px,apertura,0.07986192829685416,0.041591763360026145
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=2px,cierre,0.0803472770323599,0.04185511059945728
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=2px,cierre+apertura,0.08042980169076401,0.04189990121830754
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=2px,apertura+cierre,0.08042132982225147,0.041895302897278316
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=2px,apertura+CC+cierre+relleno,0.07970768628474488,0.04150810046754377
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=4px,erosion,0.08995254796781514,0.047094404839058114
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=4px,dilatacion,0.07302900595423133,0.03789834210265065
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=4px,apertura,0.08017641962668347,0.041762389235313425
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=4px,cierre,0.08084712111184646,0.04212646214963584
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=4px,cierre+apertura,0.08113493265322388,0.04228277122445589
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=4px,apertura+cierre,0.08116512079092142,0.04229916897506925
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=4px,apertura+CC+cierre+relleno,0.08055921920337641,0.0419701508946486
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=6px,erosion,0.09544907905563643,0.050116317713526086
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=6px,dilatacion,0.069956019791094,0.036245816420992664
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=6px,apertura,0.08088566358556029,0.04214739166436655
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=6px,cierre,0.08101870274572225,0.04221964167219642
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=6px,cierre+apertura,0.08178677592994296,0.04263695761434076
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=6px,apertura+cierre,0.08201740251369642,0.04276232882466605
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=6px,apertura+CC+cierre+relleno,0.08153349173719197,0.042499304202616196
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=8px,erosion,0.09986486486486487,0.05255671716094161
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=8px,dilatacion,0.06760376314333148,0.034984420821114366
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=8px,apertura,0.08224711838845201,0.042887234938913076
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=8px,cierre,0.08118885580603999,0.04231206184710022
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=8px,cierre+apertura,0.08276422764227642,0.043168518361462134
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=8px,apertura+cierre,0.08343578395213506,0.043534040369483405
+registro_A1_frame_2935.png,2.2 [Otsu multinivel (T=63)] r=8px,apertura+CC+cierre+relleno,0.0839403017892972,0.04380881340371816
+registro_A1_frame_2935.png,2.2 [Watershed] r=2px,original,0.9329183955739973,0.8742709008425146
+registro_A1_frame_2935.png,2.2 [Watershed] r=2px,erosion,0.8437381763147938,0.7297120418848168
+registro_A1_frame_2935.png,2.2 [Watershed] r=2px,dilatacion,0.9525015832805573,0.909310761789601
+registro_A1_frame_2935.png,2.2 [Watershed] r=2px,apertura,0.9309746791536594,0.8708630759247242
+registro_A1_frame_2935.png,2.2 [Watershed] r=2px,cierre,0.9343922651933702,0.8768632534024627
+registro_A1_frame_2935.png,2.2 [Watershed] r=2px,cierre+apertura,0.9335640138408304,0.8754055807916937
+registro_A1_frame_2935.png,2.2 [Watershed] r=2px,apertura+cierre,0.9313453536754508,0.8715120051914341
+registro_A1_frame_2935.png,2.2 [Watershed] r=2px,apertura+CC+cierre+relleno,0.9313453536754508,0.8715120051914341
+registro_A1_frame_2935.png,2.2 [Watershed] r=4px,erosion,0.7301455301455302,0.5749836280288146
+registro_A1_frame_2935.png,2.2 [Watershed] r=4px,dilatacion,0.881130986728217,0.7875193398659103
+registro_A1_frame_2935.png,2.2 [Watershed] r=4px,apertura,0.9316596931659693,0.8720626631853786
+registro_A1_frame_2935.png,2.2 [Watershed] r=4px,cierre,0.9362288865908307,0.880103694102398
+registro_A1_frame_2935.png,2.2 [Watershed] r=4px,cierre+apertura,0.9370242214532872,0.8815104166666666
+registro_A1_frame_2935.png,2.2 [Watershed] r=4px,apertura+cierre,0.932404181184669,0.8733681462140992
+registro_A1_frame_2935.png,2.2 [Watershed] r=4px,apertura+CC+cierre+relleno,0.932404181184669,0.8733681462140992
+registro_A1_frame_2935.png,2.2 [Watershed] r=6px,erosion,0.6073871409028728,0.4361493123772102
+registro_A1_frame_2935.png,2.2 [Watershed] r=6px,dilatacion,0.8009441384736428,0.6679790026246719
+registro_A1_frame_2935.png,2.2 [Watershed] r=6px,apertura,0.9248067463106114,0.8601307189542484
+registro_A1_frame_2935.png,2.2 [Watershed] r=6px,cierre,0.93805918788713,0.8833441348023331
+registro_A1_frame_2935.png,2.2 [Watershed] r=6px,cierre+apertura,0.9382801664355063,0.883736120182887
+registro_A1_frame_2935.png,2.2 [Watershed] r=6px,apertura+cierre,0.9251844046364595,0.8607843137254902
+registro_A1_frame_2935.png,2.2 [Watershed] r=6px,apertura+CC+cierre+relleno,0.9251844046364595,0.8607843137254902
+registro_A1_frame_2935.png,2.2 [Watershed] r=8px,erosion,0.48662041625371655,0.32154551407989523
+registro_A1_frame_2935.png,2.2 [Watershed] r=8px,dilatacion,0.7334293948126801,0.5790671217292378
+registro_A1_frame_2935.png,2.2 [Watershed] r=8px,apertura,0.9229144667370645,0.8568627450980392
+registro_A1_frame_2935.png,2.2 [Watershed] r=8px,cierre,0.9395189003436426,0.8859364873622813
+registro_A1_frame_2935.png,2.2 [Watershed] r=8px,cierre+apertura,0.9375,0.8823529411764706
+registro_A1_frame_2935.png,2.2 [Watershed] r=8px,apertura+cierre,0.9232934553131598,0.857516339869281
+registro_A1_frame_2935.png,2.2 [Watershed] r=8px,apertura+CC+cierre+relleno,0.9232934553131598,0.857516339869281
+registro_A1_frame_2935.png,2.2 [Snake] r=2px,original,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=2px,erosion,0.8240277242972661,0.7007203667321545
+registro_A1_frame_2935.png,2.2 [Snake] r=2px,dilatacion,0.9616770389780543,0.9261829652996846
+registro_A1_frame_2935.png,2.2 [Snake] r=2px,apertura,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=2px,cierre,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=2px,cierre+apertura,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=2px,apertura+cierre,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=2px,apertura+CC+cierre+relleno,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=4px,erosion,0.7168067226890756,0.5586116568434839
+registro_A1_frame_2935.png,2.2 [Snake] r=4px,dilatacion,0.9137207908927502,0.8411472697186982
+registro_A1_frame_2935.png,2.2 [Snake] r=4px,apertura,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=4px,cierre,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=4px,cierre+apertura,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=4px,apertura+cierre,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=4px,apertura+CC+cierre+relleno,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=6px,erosion,0.5977961432506887,0.4263261296660118
+registro_A1_frame_2935.png,2.2 [Snake] r=6px,dilatacion,0.8335152838427947,0.7145531118390267
+registro_A1_frame_2935.png,2.2 [Snake] r=6px,apertura,0.91290437255599,0.8397645519947678
+registro_A1_frame_2935.png,2.2 [Snake] r=6px,cierre,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=6px,cierre+apertura,0.91290437255599,0.8397645519947678
+registro_A1_frame_2935.png,2.2 [Snake] r=6px,apertura+cierre,0.91290437255599,0.8397645519947678
+registro_A1_frame_2935.png,2.2 [Snake] r=6px,apertura+CC+cierre+relleno,0.91290437255599,0.8397645519947678
+registro_A1_frame_2935.png,2.2 [Snake] r=8px,erosion,0.4798407167745147,0.31565160445317614
+registro_A1_frame_2935.png,2.2 [Snake] r=8px,dilatacion,0.7640730547910933,0.6182186234817814
+registro_A1_frame_2935.png,2.2 [Snake] r=8px,apertura,0.9125177809388336,0.8391105297580118
+registro_A1_frame_2935.png,2.2 [Snake] r=8px,cierre,0.9144479943201987,0.842380640941792
+registro_A1_frame_2935.png,2.2 [Snake] r=8px,cierre+apertura,0.9125177809388336,0.8391105297580118
+registro_A1_frame_2935.png,2.2 [Snake] r=8px,apertura+cierre,0.9125177809388336,0.8391105297580118
+registro_A1_frame_2935.png,2.2 [Snake] r=8px,apertura+CC+cierre+relleno,0.9125177809388336,0.8391105297580118

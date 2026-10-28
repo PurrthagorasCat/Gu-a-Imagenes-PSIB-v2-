@@ -92,17 +92,17 @@ def ejecutar_pipeline(ruta_video=RUTA_VIDEO, frame_referencia=None):
 
     # 1. Importación del video ----------------------------------------------------------
     with ui.paso(1, total, "Importación del video (Módulo 0)"):
-        video, metadatos = m0.abrir_video(ruta)
-        ui.tabla({"Resolución": f"{metadatos['ancho']} x {metadatos['alto']} px",
-                  "Frecuencia": ui.numero(metadatos["fps"], 2, "fps"),
-                  "Frames": metadatos["cantidad_frames"],
-                  "Duración": ui.numero(metadatos["duracion_s"], 2, "s"),
-                  "Códec": metadatos["codec"]})
-        if MOSTRAR_PASOS:
-            ui.info("Se abre el video (Espacio: pausa | q: cerrar) y después los frames de muestra.")
-            m0.reproducir_video(ruta)
-            m0.mostrar_frames_muestra(video, metadatos)
-        video.release()
+        with m0.abrir_video(ruta) as video:
+            metadatos = m0.leer_metadatos(video, ruta)
+            ui.tabla({"Resolución": f"{metadatos['ancho']} x {metadatos['alto']} px",
+                      "Frecuencia": ui.numero(metadatos["fps"], 2, "fps"),
+                      "Frames": metadatos["cantidad_frames"],
+                      "Duración": ui.numero(metadatos["duracion_s"], 2, "s"),
+                      "Códec": metadatos["codec"]})
+            if MOSTRAR_PASOS:
+                ui.info("Se abre el video (Espacio: pausa | q: cerrar) y después los frames de muestra.")
+                m0.reproducir_video(ruta)
+                m0.mostrar_frames_muestra(video, metadatos)
 
     # 2. ROI y mejoramiento -------------------------------------------------------------
     figura_mejora = carpeta / "resultados_modulo1" / f"{ruta.stem}_mejoramiento.png"
@@ -129,11 +129,11 @@ def ejecutar_pipeline(ruta_video=RUTA_VIDEO, frame_referencia=None):
     # 3. Segmentación frame a frame -------------------------------------------------------
     with ui.paso(3, total, "Segmentación de la pupila frame a frame (Módulo 2)"):
         ui.info("Cada frame: mejoramiento (Módulo 1) y segmentación de la imagen mejorada (Módulo 2)")
-        filas, r_iris = m2.ejecutar_modulo2(ruta, preparacion=preparacion)
+        filas = m2.ejecutar_modulo2(ruta, preparacion=preparacion)
 
     # 4. Curva temporal y artefactos ------------------------------------------------------
     with ui.paso(4, total, "Curva temporal y artefactos (Módulo 3)"):
-        curva = m3.curva_desde_modulo2(filas, ruta, r_iris)
+        curva = m3.curva_desde_modulo2(filas, ruta)
         curva = m3.limpiar_curva(curva)
 
     # 5. Estímulo y parámetros fisiológicos -----------------------------------------------

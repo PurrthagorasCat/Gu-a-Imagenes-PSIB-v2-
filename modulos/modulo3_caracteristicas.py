@@ -3,8 +3,8 @@ Módulo 3 — Extracción de características, textura y dinámica temporal.
 
 3.1 a 3.3 trabajan sobre un frame y parten de la máscara binaria de la pupila.
 3.4 a 3.6 trabajan sobre el video completo y parten de la salida del módulo 2:
-    filas, r_iris_px = ejecutar_modulo2(ruta_video)        # módulo 2
-    curva = curva_desde_modulo2(filas, ruta_video, r_iris_px)
+    filas = ejecutar_modulo2(ruta_video)                   # módulo 2
+    curva = curva_desde_modulo2(filas, ruta_video)
     curva = limpiar_curva(curva)
     t_estimulo, tipo = detectar_estimulo(curva)
     parametros = parametros_fisiologicos(curva, t_estimulo, tipo, mm_por_px=None)   # o la escala calibrada
@@ -17,7 +17,6 @@ import cv2                       # OpenCV: componentes conexas, contornos y mome
 import numpy as np               # Cálculo numérico (arrays, histogramas, estadística)
 import pandas as pd              # Tablas: curva temporal y exportación a CSV
 import matplotlib.pyplot as plt  # Gráficos
-from matplotlib.patches import Ellipse          # Elipse equivalente sobre la pupila
 from scipy.ndimage import binary_dilation       # Ensanchar en el tiempo los tramos con artefactos
 from scipy.signal import savgol_filter          # Suavizado de Savitzky-Golay de la curva
 from skimage.feature import graycomatrix, graycoprops  # Matriz de co-ocurrencia (GLCM) y sus propiedades
@@ -100,30 +99,6 @@ def descriptores_morfometricos(mascara):
         "circularidad": 4 * np.pi * area / perimetro ** 2 if perimetro > 0 else np.nan,
         "excentricidad": np.sqrt(1 - lambda_2 / lambda_1) if lambda_1 > 0 else np.nan,
     }
-
-
-def imprimir_descriptores(descriptores, mm_por_px=None):
-    """
-    Imprime los descriptores por consola.
-
-    Entrada: descriptores (dict de descriptores_morfometricos), mm_por_px (opcional, para verlos en mm)
-    Salida: nada
-    """
-    d = descriptores
-    if mm_por_px is None:
-        escala, unidad = 1.0, "px"
-    else:
-        escala, unidad = mm_por_px, "mm"
-    print("─" * 45)
-    print(f"Área             : {d['area'] * escala ** 2:.2f} {unidad}²")
-    print(f"Perímetro        : {d['perimetro'] * escala:.2f} {unidad}")
-    print(f"Diámetro equiv.  : {d['diametro'] * escala:.2f} {unidad}")
-    print(f"Centroide (x, y) : ({d['centroide_x']:.1f}, {d['centroide_y']:.1f}) px")
-    print(f"Ejes (may / men) : {d['eje_mayor'] * escala:.2f} / {d['eje_menor'] * escala:.2f} {unidad}")
-    print(f"Orientación      : {d['orientacion_grados']:.1f}°")
-    print(f"Circularidad     : {d['circularidad']:.3f}")
-    print(f"Excentricidad    : {d['excentricidad']:.3f}")
-    print("─" * 45)
 
 
 # ------------------------------------------------------------
@@ -240,28 +215,6 @@ def textura_glcm_por_canal(canales, niveles=32, distancia=1, angulos=(0, 45, 90,
     return pd.DataFrame(filas).T
 
 
-def mostrar_glcm(gris, niveles=32, distancia=1, angulos=(0, 45, 90, 135), mascara=None, titulo=None):
-    """
-    Grafica la GLCM de cada ángulo en escala logarítmica.
-
-    Entrada: los mismos que matriz_coocurrencia, titulo (opcional)
-    Salida: nada (muestra la figura)
-    """
-    P = matriz_coocurrencia(gris, niveles, distancia, angulos, mascara)
-    fig, ejes = plt.subplots(1, len(angulos), figsize=(3.6 * len(angulos), 3.8),
-                             squeeze=False, layout="constrained")
-    for k, (eje, angulo) in enumerate(zip(ejes[0], angulos)):
-        # Se suma 1e-6 porque log(0) no está definido
-        im = eje.imshow(np.log10(P[:, :, k] + 1e-6), cmap="viridis", vmin=-6, vmax=0)
-        eje.set_title(f"{angulo}°, d = {distancia}")
-        eje.set_xlabel("Nivel j")
-        eje.set_ylabel("Nivel i")
-    fig.colorbar(im, ax=ejes[0].tolist(), label="log₁₀ P(i, j)", fraction=0.02)
-    if titulo:
-        fig.suptitle(titulo, fontweight="bold")
-    plt.show()
-
-
 # ------------------------------------------------------------
 # 3.4 Curva temporal a partir de la segmentación frame a frame (módulo 2)
 # ------------------------------------------------------------
@@ -269,10 +222,6 @@ def mostrar_glcm(gris, niveles=32, distancia=1, angulos=(0, 45, 90, 135), mascar
 # Columnas de la curva temporal, en orden fijo
 COLUMNAS_CURVA = ["frame", "t_s", "brillo", "diametro", "area", "centroide_x", "centroide_y",
                   "circularidad", "motivo_invalido"]
-
-# Diámetro horizontal del iris visible en adultos (HVID): ~11,7 mm, con poca variación
-# entre personas (aprox. 10,7 a 12,6 mm)
-DIAMETRO_IRIS_MM = 11.7
 
 
 def brillo_por_frame(ruta_video, frames=None):
@@ -282,47 +231,37 @@ def brillo_por_frame(ruta_video, frames=None):
     Entrada: ruta_video, frames (índices a leer; None = todos)
     Salida: diccionario {índice de frame: brillo}
     """
-    video, metadatos = m0.abrir_video(ruta_video)
-    pedidos = set(range(metadatos["cantidad_frames"])) if frames is None else {int(f) for f in frames}
     brillo = {}
-    for indice in range(max(pedidos, default=-1) + 1):
-        # Los frames se leen en orden (es mucho más rápido que posicionarse en cada uno).
-        # grab() avanza sin convertir la imagen, para los frames que no se piden
-        if indice not in pedidos:
-            if not video.grab():
-                break
-            continue
-        ok, frame = video.read()
-        if not ok:
-            break  # El encabezado puede informar más frames de los que hay realmente
-        # Sobre una versión achicada: alcanza para el promedio y es mucho más rápido
-        chico = cv2.resize(frame, None, fx=0.1, fy=0.1, interpolation=cv2.INTER_AREA)
-        brillo[indice] = cv2.cvtColor(chico, cv2.COLOR_BGR2GRAY).mean()
-    video.release()
+    with m0.abrir_video(ruta_video) as video:
+        pedidos = set(range(int(video.get(cv2.CAP_PROP_FRAME_COUNT)))) if frames is None else {int(f) for f in frames}
+        for indice in range(max(pedidos, default=-1) + 1):
+            # Los frames se leen en orden (es mucho más rápido que posicionarse en cada uno).
+            # grab() avanza sin convertir la imagen, para los frames que no se piden
+            if indice not in pedidos:
+                if not video.grab():
+                    break
+                continue
+            ok, frame = video.read()
+            if not ok:
+                break  # El encabezado puede informar más frames de los que hay realmente
+            # Sobre una versión achicada: alcanza para el promedio y es mucho más rápido
+            chico = cv2.resize(frame, None, fx=0.1, fy=0.1, interpolation=cv2.INTER_AREA)
+            brillo[indice] = cv2.cvtColor(chico, cv2.COLOR_BGR2GRAY).mean()
     return brillo
 
 
-def curva_desde_modulo2(filas, ruta_video=None, r_iris_px=None):
+def curva_desde_modulo2(filas, ruta_video=None):
     """
     Pasa la tabla frame a frame del módulo 2 al formato de curva de este módulo y le
     agrega el brillo de cada frame. El diámetro es el ancho horizontal de la pupila que mide
     el módulo 2 (los párpados casi no lo afectan). Los frames que descartó quedan en NaN.
 
     Entrada: filas (lo que devuelve ejecutar_modulo2 del módulo 2, o su CSV _serie.csv),
-             ruta_video (opcional, para el brillo), r_iris_px (radio del iris del módulo 2;
-             si no se pasa se intenta calcular de la tabla)
+             ruta_video (opcional, para el brillo)
     Salida: DataFrame con las columnas de COLUMNAS_CURVA
     """
     serie = pd.DataFrame(filas).reset_index(drop=True)
-    if r_iris_px is None:
-        r_iris_px = radio_iris_modulo2(serie)
-
-    # Diámetro equivalente al área. La versión actual del módulo 2 lo da en px (d_area_px);
-    # la anterior lo daba dividido por el diámetro del iris (d_area_iris)
-    if "d_area_px" in serie:
-        d_area = serie["d_area_px"].astype(float)
-    else:
-        d_area = serie["d_area_iris"].astype(float) * 2 * r_iris_px
+    d_area = serie["d_area_px"].astype(float)   # Diámetro equivalente al área, en px
 
     curva = pd.DataFrame({
         "frame": serie["frame"].astype(int),
@@ -350,38 +289,6 @@ def curva_desde_modulo2(filas, ruta_video=None, r_iris_px=None):
     for motivo, cantidad in motivos.value_counts().items():
         print(f"  {cantidad:5d}  {motivo}")
     return curva
-
-
-def radio_iris_modulo2(serie):
-    """
-    Recupera el radio del iris (px) que usó el módulo 2 como escala. Solo funciona con la
-    tabla de la versión anterior del módulo 2 (columna pupila_iris); con la actual el radio
-    hay que pasarlo, porque lo devuelve ejecutar_modulo2.
-
-    Entrada: serie (DataFrame del módulo 2)
-    Salida: radio en px (NaN si no se puede calcular)
-    """
-    if "pupila_iris" not in serie:
-        return np.nan
-    validos = serie["d_pupila_px"].notna() & serie["pupila_iris"].notna() & (serie["pupila_iris"] > 0)
-    if not validos.any():
-        return np.nan
-    return float(np.median(serie.loc[validos, "d_pupila_px"] / serie.loc[validos, "pupila_iris"])) / 2
-
-
-def mm_por_px_desde_iris(r_iris_px, diametro_iris_mm=DIAMETRO_IRIS_MM):
-    """
-    Escala aproximada suponiendo que el iris mide 11,7 mm (varía cerca de ±5 % entre
-    personas). Solo sirve si r_iris_px sale de MEDIR el iris.
-
-    Atención: el r_iris_px del módulo 2 no es una medición. Se deduce de la pupila al
-    comienzo del video (r_pupila / 0,45), así que con esa escala la pupila inicial mide
-    siempre 0,45 · 11,7 ≈ 5,3 mm, sea cual sea su tamaño real.
-
-    Entrada: r_iris_px, diametro_iris_mm (opcional)
-    Salida: mm por píxel (NaN si no hay radio)
-    """
-    return diametro_iris_mm / (2 * r_iris_px) if r_iris_px and np.isfinite(r_iris_px) else np.nan
 
 
 # ------------------------------------------------------------
@@ -715,20 +622,6 @@ def parametros_fisiologicos(curva, t_estimulo, tipo="contraccion", columna="diam
     return parametros
 
 
-def imprimir_parametros(parametros):
-    """
-    Imprime los parámetros por consola.
-
-    Entrada: parametros (dict de parametros_fisiologicos)
-    Salida: nada
-    """
-    print("─" * 45)
-    for clave, valor in parametros.items():
-        texto = valor if isinstance(valor, str) else f"{valor:.3f}"
-        print(f"{clave:<34}: {texto}")
-    print("─" * 45)
-
-
 def variabilidad_entre_registros(parametros_por_registro,
                                  columnas=("latencia_s", "amplitud_area_%", "amplitud_diametro_%",
                                            "velocidad_constriccion_max_px_s", "velocidad_redilatacion_max_px_s")):
@@ -776,41 +669,6 @@ def guardar_resultados(curva, parametros, carpeta="resultados/"):
 # ------------------------------------------------------------
 # Visualización
 # ------------------------------------------------------------
-
-def mostrar_descriptores(imagen, mascara, descriptores=None, titulo=None):
-    """
-    Muestra la imagen con el contorno de la pupila, el centroide y la elipse
-    equivalente, y al lado la máscara.
-
-    Entrada: imagen, mascara, descriptores (opcional; si no se pasan se calculan), titulo
-    Salida: nada (muestra la figura)
-    """
-    if descriptores is None:
-        descriptores = descriptores_morfometricos(mascara)
-    componente = componente_principal(mascara)
-    d = descriptores
-
-    fig, (eje_img, eje_mask) = plt.subplots(1, 2, figsize=(13, 5), layout="constrained")
-    eje_img.imshow(imagen, cmap=None if imagen.ndim == 3 else "gray")
-    if componente is not None:
-        # contour dibuja la curva de nivel 0,5 de la máscara: el borde de la región
-        eje_img.contour(componente, levels=[0.5], colors="lime", linewidths=1.5)
-        eje_img.add_patch(Ellipse((d["centroide_x"], d["centroide_y"]), d["eje_mayor"], d["eje_menor"],
-                                  angle=d["orientacion_grados"], fill=False, edgecolor="red",
-                                  linestyle="--", linewidth=1.5))
-        eje_img.plot(d["centroide_x"], d["centroide_y"], "r+", markersize=12, markeredgewidth=2)
-    eje_img.set_title(f"Contorno (verde), elipse equivalente (rojo)\n"
-                      f"Circularidad = {d['circularidad']:.3f}, excentricidad = {d['excentricidad']:.3f}")
-    eje_img.axis("off")
-
-    eje_mask.imshow(mascara > 0, cmap="gray")
-    eje_mask.set_title(f"Máscara\nÁrea = {d['area']:.0f} px, diámetro equivalente = {d['diametro']:.1f} px")
-    eje_mask.axis("off")
-
-    if titulo:
-        fig.suptitle(titulo, fontweight="bold")
-    plt.show()
-
 
 def mostrar_curva(curva, columna="diametro", parametros=None, unidad="px", titulo=None):
     """

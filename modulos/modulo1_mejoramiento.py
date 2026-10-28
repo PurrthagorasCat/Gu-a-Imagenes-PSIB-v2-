@@ -513,28 +513,6 @@ def mostrar_con_histogramas(imagenes, titulos, titulo_figura=None, ancho_columna
     plt.show()
  
  
-def graficar_transformaciones(curvas, titulo=None):
-    """Grafica funciones de transformación g = T(f); `curvas` = {nombre: T evaluada en 0…255}."""
-    f = np.arange(256)
-    fig, eje = plt.subplots(figsize=(5, 5), layout="constrained")
-    eje.plot(f, f, color=GRIS_EJES, linestyle="--", linewidth=1.2, label="Identidad")
-    for (nombre, t), color in zip(curvas.items(), COLORES):
-        eje.plot(f, t, color=color, linewidth=2, label=nombre)
- 
-    eje.set_xlim(0, 255)
-    eje.set_ylim(-3, 258)
-    eje.set_aspect("equal")
-    eje.set_xlabel("Nivel de entrada f", color=GRIS_TEXTO)
-    eje.set_ylabel("Nivel de salida g = T(f)", color=GRIS_TEXTO)
-    eje.legend(frameon=False, loc="lower right", fontsize=9)
-    _ejes_recesivos(eje)
-    eje.grid(axis="x", color=GRIS_GRILLA, linewidth=0.8)
-    if titulo:
-        eje.set_title(titulo, fontweight="bold")
-    plt.show()
- 
- 
- 
 def superponer(imagen, capas):
     """Imagen en grises con máscaras coloreadas encima; `capas` = [(máscara, color), ...]."""
     salida = np.dstack([imagen] * 3) / 255
