@@ -334,13 +334,13 @@ def cargar(path, roi_fijo=None, rect=None, nuevo_roi=False, factor=None, r_iris=
     print(f"{Path(path).name}: ROI x={roi_fijo.x0} y={roi_fijo.y0} {roi_fijo.w}x{roi_fijo.h} px "
           f"({roi_fijo.origen})")
     if r_iris is None:
-        # escala: radio del iris medido en el limbo (si no se puede, pupila / 0,45)
+        # escala: 1,15 veces el radio del iris medido en el limbo (si no se puede, pupila / 0,45)
         f_rap = min(1.0, 600 / max(roi_fijo.w, roi_fijo.h))
         c0, _ = recortar(bgr_full, roi_fijo, f_rap)
         mejora0 = m1.suavizar_roi(c0)
         x, y, r_p = estimar_pupila(mejora0["suave_ubicacion"])
         limbo = medir_limbo(mejora0["gris"], (x, y), r_p)
-        r_iris = (limbo if limbo is not None else r_p / PUPILA_SOBRE_IRIS) / f_rap
+        r_iris = (REFERENCIA_SOBRE_IRIS * limbo if limbo is not None else r_p / PUPILA_SOBRE_IRIS) / f_rap
         if r_iris <= 0:
             r_iris = roi_fijo.r_ref
     if factor is None:
@@ -374,9 +374,16 @@ def estimar_pupila(suave, cerca_de=None, radio=None):
     return circulo_inscripto(oscuro)
 
 
-# Cociente típico pupila/iris (radios). Solo se usa si no se puede medir el
-# limbo (ver medir_limbo): el cociente real va de ~0,25 con luz a ~0,6 en la
-# oscuridad, así que con una pupila contraída subestima mucho el iris.
+# Radio de referencia (la escala de todos los parámetros) / radio del iris
+# medido. Los parámetros se ajustaron con registro_A1 cuando la referencia se
+# estimaba como pupila / 0,45, que en ese video daba 1,15 veces el iris
+# medido: con este factor se conserva ese ajuste.
+REFERENCIA_SOBRE_IRIS = 1.15
+
+# Cociente pupila/iris con el que se estimaba la referencia. Solo se usa si
+# no se puede medir el limbo (ver medir_limbo): el cociente real va de ~0,25
+# con luz a ~0,6 en la oscuridad, así que con una pupila contraída la
+# referencia queda muy chica.
 PUPILA_SOBRE_IRIS = 0.45
 
 
@@ -798,12 +805,13 @@ def inicializar(path, rect=None, nuevo_roi=False, indice=0):
 
 
 def calibrar_escala(path, roi, n=10, t=2.0, inicio=0):
-    """Tamaño de referencia para TODOS los parámetros: el radio del iris, en px
-    del video original. En n frames de los t segundos que siguen al frame
-    `inicio` se ubica la pupila (estimar_pupila) y se mide el limbo en el
-    perfil radial (medir_limbo); se toma la mediana, que descarta parpadeos.
-    Si en la mayoría de los frames no se puede medir el limbo, se estima como
-    pupila / 0,45 (menos preciso: depende de cuán dilatada esté la pupila)."""
+    """Radio de referencia para TODOS los parámetros, en px del video original:
+    1,15 veces el radio del iris (ver REFERENCIA_SOBRE_IRIS). En n frames de
+    los t segundos que siguen al frame `inicio` se ubica la pupila
+    (estimar_pupila) y se mide el limbo en el perfil radial (medir_limbo); se
+    toma la mediana, que descarta parpadeos. Si en la mayoría de los frames
+    no se puede medir el limbo, se estima como pupila / 0,45 (menos preciso:
+    depende de cuán dilatada esté la pupila)."""
     radios, limbos = [], []
     with m0.abrir_video(_ruta(path, CARPETA_VIDEOS)) as cap:
         fps = m0.fps_de(cap)
@@ -831,13 +839,14 @@ def calibrar_escala(path, roi, n=10, t=2.0, inicio=0):
     r_p = float(np.median(radios))
     desde = "al comienzo" if not inicio else f"desde el frame {inicio}"
     if len(limbos) >= max(3, len(radios) // 2):
-        r_iris = float(np.median(limbos))
-        print(f"Escala: radio del iris medido en el limbo ≈ {r_iris:.0f} px (mediana de {len(limbos)} "
-              f"frames); radio de pupila {desde} ≈ {r_p:.1f} px")
+        r_limbo = float(np.median(limbos))
+        r_iris = REFERENCIA_SOBRE_IRIS * r_limbo
+        print(f"Escala: radio del iris medido en el limbo ≈ {r_limbo:.0f} px (mediana de {len(limbos)} "
+              f"frames) -> radio de referencia ≈ {r_iris:.0f} px; radio de pupila {desde} ≈ {r_p:.1f} px")
     else:
         r_iris = r_p / PUPILA_SOBRE_IRIS
-        print(f"  [aviso] no se pudo medir el borde del iris (limbo) en {desde}: el radio del iris se "
-              f"estima como pupila / {PUPILA_SOBRE_IRIS} ≈ {r_iris:.0f} px (pupila ≈ {r_p:.1f} px)")
+        print(f"  [aviso] no se pudo medir el borde del iris (limbo) en {desde}: el radio de referencia "
+              f"se estima como pupila / {PUPILA_SOBRE_IRIS} ≈ {r_iris:.0f} px (pupila ≈ {r_p:.1f} px)")
     return r_iris
 
 
@@ -918,9 +927,8 @@ def ancho_horizontal(contorno, paso=0.1):
 
 def calidad(mask, mejora, r_ref):
     """Devuelve (válido, motivo, medidas). Rangos fisiológicos con el iris
-    de referencia r_ref (medido en el limbo al comienzo del video, ver
-    calibrar_escala): la pupila mide entre
-    ~10 % y ~90 % del iris. De la mejora del módulo 1 se usan el gris sin
+    de referencia r_ref (1,15 veces el iris medido en el limbo, ver
+    calibrar_escala): la pupila mide entre ~10 % y ~90 % de r_ref. De la mejora del módulo 1 se usan el gris sin
     filtrar (oscuridad y contraste) y el umbral F2."""
     if mask is None or mask.sum() < 10:
         return False, "sin pupila", {}
@@ -977,7 +985,7 @@ def preparar(path, rect=None, nuevo_roi=False, factor=None, frame_referencia=Non
     r_iris = calibrar_escala(path, roi, inicio=frame_referencia)
     factor = factor_auto(roi, r_iris) if factor is None else min(1.0, factor)
     print(f"Resolución de procesamiento: {100 * factor:.0f} % del video original "
-          f"(radio de iris ≈ {r_iris * factor:.0f} px)")
+          f"(radio de referencia ≈ {r_iris * factor:.0f} px)")
     return dict(roi=roi, r_iris=r_iris, factor=factor, frame_referencia=frame_referencia)
 
 

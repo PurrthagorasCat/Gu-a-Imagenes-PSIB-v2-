@@ -2,14 +2,28 @@
 .venv/
 .venv.nosync/
 
-# Archivos generados por Python y macOS
+# Archivos generados por Python, Jupyter y macOS
 __pycache__/
 *.pyc
+.ipynb_checkpoints/
 .DS_Store
 
 # Videos de los registros: pesan más de 100 MB y GitHub no los acepta
 videos/*.MOV
 videos/*.mov
+videos/*.mp4
+videos/*.MP4
 
-# Salidas generadas al correr el pipeline
-resultados/*.csv
+# Salidas generadas al correr el pipeline: se regeneran con cada corrida y no se versionan.
+# Solo se conserva lo que usa la validación del notebook (sección 7), que se puede correr sin el video:
+# la serie del módulo 2 y los frames anotados de registro_A1.
+resultados/*
+!resultados/.gitkeep
+!resultados/resultados_modulo2/
+resultados/resultados_modulo2/*
+!resultados/resultados_modulo2/resultados_video/
+resultados/resultados_modulo2/resultados_video/*
+!resultados/resultados_modulo2/resultados_video/registro_A1_serie.csv
+!resultados/resultados_modulo2/resultados_video/frames/
+resultados/resultados_modulo2/resultados_video/frames/*
+!resultados/resultados_modulo2/resultados_video/frames/registro_A1_frame_*.png
